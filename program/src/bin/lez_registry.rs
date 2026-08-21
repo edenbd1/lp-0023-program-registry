@@ -46,6 +46,17 @@ pub struct EntryAccount {
     pub entry: Vec<u8>,
 }
 
+/// One slot of the sequence directory: which program registered nth.
+///
+/// Exists because the chain cannot enumerate. Resolution never needs this;
+/// discovery does, and without it an indexer has no way to learn which program
+/// ids were ever registered.
+#[account_type]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
+pub struct DirectoryAccount {
+    pub program_id: [u8; 32],
+}
+
 /// Registry-wide counters.
 #[account_type]
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Default)]
@@ -112,8 +123,10 @@ mod lez_registry {
         #[account(init, pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
         #[account(mut, pda = [literal("lez-registry:global:v1")])]
         mut global: AccountWithMetadata,
+        #[account(init, pda = arg("seq_seed"))] mut directory: AccountWithMetadata,
         #[account(signer)] author: AccountWithMetadata,
         entry_seed: [u8; 32],
+        seq_seed: [u8; 32],
         program_id: [u8; 32],
         canonical: u8,
         name: String,
@@ -152,6 +165,18 @@ mod lez_registry {
             ));
         }
 
+        // The directory slot is not the caller's to choose either: it is the
+        // counter's current value. Trusting the supplied seed would let a caller
+        // overwrite an earlier slot and hide an entry from every indexer.
+        let mut g = GlobalAccount::try_from_slice(&global.account.data)
+            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
+        if lez_registry_core::seq_seed(g.total_entries) != seq_seed {
+            return Err(SpelError::custom(
+                E_SEED_MISMATCH,
+                "seq_seed is not the slot this registration derives",
+            ));
+        }
+
         // `init` already refuses an existing account, so a duplicate lands here
         // rather than silently overwriting someone's entry.
         if !entry.account.data.is_empty() {
@@ -168,8 +193,10 @@ mod lez_registry {
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
         store_entry(&mut entry.account, &e)?;
 
-        let mut g = GlobalAccount::try_from_slice(&global.account.data)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
+        let slot = borsh::to_vec(&DirectoryAccount { program_id })
+            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "directory slot failed to encode"))?;
+        write(&mut directory.account, &slot)?;
+
         g.total_entries = g
             .total_entries
             .checked_add(1)
@@ -178,7 +205,10 @@ mod lez_registry {
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
         write(&mut global.account, &bytes)?;
 
-        Ok(SpelOutput::execute(vec![entry, global, author], vec![]))
+        Ok(SpelOutput::execute(
+            vec![entry, global, directory, author],
+            vec![],
+        ))
     }
 
     /// Update metadata. Author only, and only while unfrozen — both enforced by

@@ -54,6 +54,20 @@
           }
         },
         {
+          "name": "directory",
+          "writable": true,
+          "signer": false,
+          "init": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "seq_seed"
+              }
+            ]
+          }
+        },
+        {
           "name": "author",
           "writable": false,
           "signer": true,
@@ -63,6 +77,15 @@
       "args": [
         {
           "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "seq_seed",
           "type": {
             "array": [
               "u8",
@@ -331,6 +354,23 @@
             "name": "entry",
             "type": {
               "vec": "u8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DirectoryAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
             }
           }
         ]

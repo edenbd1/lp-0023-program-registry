@@ -1,0 +1,13 @@
+[package]
+name = "lez-registry-indexer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Self-hostable search index for a LEZ program registry."
+
+[dependencies]
+lez-registry-core = { path = ".." }
+lez-registry-sdk = { path = "../sdk" }
+
+[profile.release]
+overflow-checks = true

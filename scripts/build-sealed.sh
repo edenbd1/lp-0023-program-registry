@@ -27,9 +27,14 @@ trap cleanup EXIT
 echo "[1/2] fetching dependencies (network), checked against Cargo.lock ..."
 # cargo vendor writes the crates and prints the config stanza that points at
 # them; capture the stanza from the same run rather than vendoring twice.
+# Write the stanza to a temp file first. Redirecting straight into
+# .cargo/config.toml would have cargo reading a half-written config of its own
+# while it vendors.
+STANZA=$(mktemp)
+cargo vendor --manifest-path program/Cargo.toml "$VENDOR" > "$STANZA"
+sed -i.bak "s|directory = \".*\"|directory = \"$VENDOR\"|" "$STANZA" && rm -f "$STANZA.bak"
 mkdir -p .cargo
-cargo vendor --manifest-path program/Cargo.toml "$VENDOR" > "$CONFIG"
-sed -i.bak "s|directory = \".*\"|directory = \"$VENDOR\"|" "$CONFIG" && rm -f "$CONFIG.bak"
+mv "$STANZA" "$CONFIG"
 
 echo "[2/2] building with --network none ..."
 

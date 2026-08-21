@@ -363,6 +363,8 @@ pub struct GlobalState {
 /// with another, which a bare hash of concatenated fields does not.
 pub const ENTRY_SEED: &[u8] = b"lez-registry:entry:v1";
 pub const GLOBAL_SEED: &[u8] = b"lez-registry:global:v1";
+/// Seed prefix for the sequence directory.
+pub const SEQ_SEED: &[u8] = b"lez-registry:seq:v1";
 
 /// The seed for an entry's account, derived from the program id alone.
 ///
@@ -434,4 +436,34 @@ pub fn deployment_digest(bytecode: &[u8]) -> [u8; 32] {
     h.update((bytecode.len() as u32).to_le_bytes());
     h.update(bytecode);
     h.finalize().into()
+}
+
+/// Address of the sequence-directory slot for the `n`th registration.
+///
+/// The chain offers no way to enumerate accounts: there is no
+/// `getProgramAccounts`, no accounts-by-owner, nothing (probed against the live
+/// sequencer — every such method returns `Method not found`). Resolution does not
+/// need one, because an entry's address is a function of the program id. But
+/// *discovery* does: without enumeration, an indexer that wants to list the
+/// registry has no way to learn which program ids exist.
+///
+/// So the registry keeps its own directory. Registration `n` writes the program
+/// id here, and `n` is simply the value `total_entries` had at the time. An
+/// indexer reads that counter and walks `0..total`, deriving every address and
+/// asking the chain for nothing it cannot compute first.
+///
+/// This is a directory, not an authority. Everything it yields is re-derivable
+/// and re-checkable against the entry itself.
+#[must_use]
+pub fn seq_seed(n: u64) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(SEQ_SEED);
+    h.update(n.to_le_bytes());
+    h.finalize().into()
+}
+
+/// One slot of the sequence directory: which program registered `n`th.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct DirectorySlot {
+    pub program_id: ProgramId,
 }

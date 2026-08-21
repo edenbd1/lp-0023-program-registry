@@ -317,3 +317,39 @@ fn a_networked_rebuild_still_records_who_ran_it() {
     assert_eq!(v.attester, Some(ATTESTER));
     assert!(!v.is_verified());
 }
+
+#[test]
+fn the_sequence_directory_makes_the_registry_walkable_without_enumeration() {
+    // The chain has no getProgramAccounts and no accounts-by-owner — probed
+    // against the live sequencer, every such method answers "Method not found".
+    // Resolution never needed one, because an entry's address is a function of
+    // the program id. Discovery did: without this directory an indexer cannot
+    // learn which program ids were ever registered.
+    let a = seq_seed(0);
+    let b = seq_seed(1);
+    assert_ne!(a, b, "consecutive registrations must not share a slot");
+
+    // Walking is derivation, not a query: slot n is computable before the
+    // registry is asked anything, so an indexer's only chain access is a read
+    // per slot.
+    let walked: Vec<_> = (0..5).map(seq_seed).collect();
+    let again: Vec<_> = (0..5).map(seq_seed).collect();
+    assert_eq!(walked, again, "the walk must be reproducible");
+    assert_eq!(
+        walked
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        5,
+        "five slots, five distinct addresses"
+    );
+}
+
+#[test]
+fn a_directory_slot_survives_a_round_trip() {
+    let slot = DirectorySlot {
+        program_id: [3u8; 32],
+    };
+    let bytes = borsh::to_vec(&slot).unwrap();
+    assert_eq!(borsh::from_slice::<DirectorySlot>(&bytes).unwrap(), slot);
+}

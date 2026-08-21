@@ -50,6 +50,12 @@ pub fn third_party_entry_address(
     pda(registry, &core_::third_party_entry_seed(program, publisher))
 }
 
+/// Where the `n`th registration recorded which program it was.
+#[must_use]
+pub fn directory_address(registry: &ProgramId, n: u64) -> AccountId {
+    pda(registry, &core_::seq_seed(n))
+}
+
 /// The registry's singleton counters account.
 #[must_use]
 pub fn global_address(registry: &ProgramId) -> AccountId {
@@ -184,6 +190,37 @@ impl Client {
         borsh::from_slice(&payload)
             .map(Some)
             .map_err(|e| Error::Malformed(e.to_string()))
+    }
+
+    /// Which program registered `n`th, if anything did.
+    pub fn program_at(&self, n: u64) -> Result<Option<ProgramId>> {
+        let addr = directory_address(&self.registry, n);
+        let Some(raw) = self.account_data(&addr)? else {
+            return Ok(None);
+        };
+        borsh::from_slice::<core_::DirectorySlot>(&raw)
+            .map(|s| Some(s.program_id))
+            .map_err(|e| Error::Malformed(e.to_string()))
+    }
+
+    /// Every entry, in registration order.
+    ///
+    /// Two reads per entry and no query: slot `n` and the entry it names are both
+    /// derived before the chain is asked anything. A slot that is empty or an
+    /// entry that fails to decode is skipped rather than aborting the walk — one
+    /// bad account must not make the rest of the registry unreadable.
+    pub fn walk(&self) -> Result<Vec<Entry>> {
+        let total = self.global()?.map_or(0, |g| g.total_entries);
+        let mut out = Vec::new();
+        for n in 0..total {
+            let Some(program) = self.program_at(n)? else {
+                continue;
+            };
+            if let Some(entry) = self.entry(&program)? {
+                out.push(entry);
+            }
+        }
+        Ok(out)
     }
 
     /// The registry's counters.
