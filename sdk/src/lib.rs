@@ -255,7 +255,7 @@ mod tests {
     /// addresses below are *derived* from it — writing both the id and the
     /// addresses by hand meant they could disagree, and three times in one day
     /// they did after a redeploy.
-    const REGISTRY_HEX: &str = "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396";
+    const REGISTRY_HEX: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
 
     fn registry() -> ProgramId {
         let mut out = [0u8; 32];
@@ -269,12 +269,12 @@ mod tests {
     fn the_derivation_reproduces_a_live_testnet_address() {
         assert_eq!(
             base58(&entry_address(&registry(), &registry())),
-            "ECfj83o2bMh48F318oStb5qvA9ep7BfRd2v59V4AyQqg",
+            "wkLxSjsYNRq24FKPzDSh1haT382zwMU5QFb2YuHRD4h",
             "canonical entry of the registry's own program"
         );
         assert_eq!(
             base58(&global_address(&registry())),
-            "5sKC3dtdTfSCGc715gFyb41anbn1iLtg6U47WQWnYE4X",
+            "75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z",
             "the singleton global account"
         );
     }

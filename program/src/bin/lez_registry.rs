@@ -354,6 +354,7 @@ mod lez_registry {
     pub fn claim_source(
         ctx: ProgramContext,
         #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
+        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
         #[account(signer)] author: AccountWithMetadata,
         entry_seed: [u8; 32],
         repository: String,
@@ -392,10 +393,34 @@ mod lez_registry {
                 network_disabled: network_disabled == 1,
             },
         };
+        // Replacing the claim resets the verification, which is the version
+        // binding this design depends on. The counter has to follow: an entry
+        // that stops being verified must stop being counted, or total_verified
+        // drifts upward every time a verified entry is re-claimed and
+        // re-verified. It drifted by one within an hour of the instruction
+        // existing, and the end-to-end test that compares the counter against
+        // the actual walk is what noticed.
+        let was_verified = e.verification.is_verified();
         e.verification = lez_registry_core::Verification::claim(claim)
             .map_err(|_| SpelError::custom(E_BAD_CLAIM, "claim fields are empty or too long"))?;
         store_entry(&mut entry.account, &e)?;
-        Ok(SpelOutput::execute(vec![entry, author], vec![]))
+
+        if was_verified {
+            if global.account.program_owner != ctx.self_program_id {
+                return Err(SpelError::custom(
+                    E_NOT_ANCHORED,
+                    "global state is not owned by this program",
+                ));
+            }
+            let mut g = GlobalAccount::try_from_slice(&global.account.data)
+                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
+            g.total_verified = g.total_verified.saturating_sub(1);
+            let bytes = borsh::to_vec(&g)
+                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
+            write(&mut global.account, &bytes)?;
+        }
+
+        Ok(SpelOutput::execute(vec![entry, global, author], vec![]))
     }
 
     /// Record that a rebuild of the claimed source reproduced this entry's

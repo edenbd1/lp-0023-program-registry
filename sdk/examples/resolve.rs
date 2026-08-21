@@ -12,7 +12,7 @@ use lez_registry_sdk::{base58, entry_address, Client, ProgramId, VerificationSta
 /// The registry to ask. A consumer would put their own here, or take it from
 /// configuration; there is nothing special about this one except that it is the
 /// one running on the public testnet.
-const REGISTRY: &str = "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396";
+const REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
 const ENDPOINT: &str = "https://testnet.lez.logos.co";
 
 fn hex32(s: &str) -> Option<ProgramId> {

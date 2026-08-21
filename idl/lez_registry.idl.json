@@ -192,6 +192,20 @@
           }
         },
         {
+          "name": "global",
+          "writable": true,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": "lez-registry:global:v1"
+              }
+            ]
+          }
+        },
+        {
           "name": "author",
           "writable": false,
           "signer": true,

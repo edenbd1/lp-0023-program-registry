@@ -15,7 +15,7 @@ namespace {
 // configured because a wrong registry id derives addresses that hold nothing,
 // which reads as "not registered" — a silent wrong answer, the worst kind.
 const char* kRegistryIdHex =
-    "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396";
+    "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
 
 const char* kDefaultRpc = "https://testnet.lez.logos.co";
 

@@ -25,7 +25,7 @@ fn hex32(s: &str) -> ProgramId {
 
 fn registry() -> ProgramId {
     hex32(&std::env::var("LEZ_REGISTRY").unwrap_or_else(|_| {
-        "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396".into()
+        "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8".into()
     }))
 }
 

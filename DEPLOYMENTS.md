@@ -8,7 +8,7 @@ Built **sealed** — every build container had its network disabled.
 
 | | |
 |---|---|
-| ProgramId (RISC0 ImageID) | `c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396` |
+| ProgramId (RISC0 ImageID) | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
 | deployment digest | `2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94` |
 | deploy transaction | [`2ff83da8…be7ebb94`](https://explorer.testnet.lez.logos.co/transaction/2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94) · block 17589 |
 | global state | `42MaszdnoXcWkDZBgNJZVyP26TtD47sBxNLkXnmmr5Dj` |
@@ -17,7 +17,7 @@ Built **sealed** — every build container had its network disabled.
 ### All five verification states, live, and each one true
 
 Reproduce the whole set with
-`REGISTRY=c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396 ./scripts/populate-demo.sh`.
+`REGISTRY=f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8 ./scripts/populate-demo.sh`.
 
 | slot | name | state | why it is that state |
 |---|---|---|---|
