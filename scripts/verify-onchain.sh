@@ -67,6 +67,25 @@ else
   printf '  SKIP %-22s %s not present\n' "digest" "$BIN"
 fi
 
+# Account addresses, checked by reading them rather than by trusting this file.
+# An address quoted in documentation and never fetched is an address that can be
+# wrong for as long as nobody looks -- which is how a fabricated global-state
+# address survived one commit here.
+account() { # label base58 min_bytes
+  local n
+  n=$(curl -s -m 25 -X POST "$RPC" -H 'Content-Type: application/json' \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccount\",\"params\":[\"$2\"]}" \
+      | python3 -c 'import sys,json;r=json.load(sys.stdin).get("result");print(len(r["data"]) if r and r.get("data") else 0)' 2>/dev/null)
+  if [ "${n:-0}" -ge "$3" ]; then
+    printf '  OK   %-22s %s bytes at %s\n' "$1" "$n" "${2:0:12}..."
+  else
+    printf '  FAIL %-22s %s bytes at %s (expected >= %s)\n' "$1" "${n:-0}" "$2" "$3"
+    fail=1
+  fi
+}
+account global-state    J4xUGTSXifofxBtsJHvyfbiNUT5FECwhY2SNkx97AaQT 16
+account canonical-entry 7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK 100
+
 # Controls. Neither hash was ever deployed, so both must return null; if the
 # endpoint answers "yes" to these it is answering "yes" to anything.
 check control-zeros 0000000000000000000000000000000000000000000000000000000000000000 no

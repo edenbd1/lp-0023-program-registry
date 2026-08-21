@@ -13,7 +13,7 @@ Built **sealed** — every build container had its network disabled.
 | deploy transaction | [`c1223c72…adac2a9d`](https://explorer.testnet.lez.logos.co/transaction/c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d) · block 17474 |
 | `claim_source` | [`222a7c1b…161fcbc0`](https://explorer.testnet.lez.logos.co/transaction/222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0) |
 | `record_rebuild` | [`5823f762…f3c966e4`](https://explorer.testnet.lez.logos.co/transaction/5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4) |
-| global state | `Bqu9zbwXpKA7QjcpZzr9zxjXNDeYPCFB4v9wLexi5oLu` |
+| global state | `J4xUGTSXifofxBtsJHvyfbiNUT5FECwhY2SNkx97AaQT` |
 | canonical entry | `7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK` |
 
 ### What it holds
