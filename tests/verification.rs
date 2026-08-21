@@ -489,3 +489,117 @@ fn a_malformed_identifier_is_refused_rather_than_half_decoded() {
         "0 is not in the base58 alphabet"
     );
 }
+
+/// Squatting is possible and worthless: registering first gets you an entry, and
+/// only a rebuild that reproduces the deployed bytecode makes it stick.
+mod canonical_takeover {
+    use super::*;
+
+    const SQUATTER: AccountId = [0x11; 32];
+    const REAL: AccountId = [0x22; 32];
+    const SUBJECT: ProgramId = [0x33; 32];
+
+    fn squatted() -> Entry {
+        let mut e = Entry::new(
+            SUBJECT,
+            T0,
+            "popular-program".into(),
+            "1.0.0".into(),
+            SQUATTER,
+            Publisher::Canonical,
+        )
+        .unwrap();
+        e.verification = Verification::claim(claim_for(true)).unwrap();
+        e
+    }
+
+    #[test]
+    fn whoever_can_rebuild_it_takes_the_entry() {
+        let mut e = squatted();
+        assert_eq!(e.author, SQUATTER);
+
+        e.claim_canonical(REAL, SUBJECT, T1).unwrap();
+        assert_eq!(
+            e.author, REAL,
+            "the entry moves to whoever proved the build"
+        );
+        assert!(e.verification.is_verified());
+        assert_eq!(e.verification.attester, Some(REAL));
+        assert_eq!(e.verification.last_checked, Some(T1));
+    }
+
+    #[test]
+    fn a_challenger_who_cannot_reproduce_the_bytecode_takes_nothing() {
+        // This is the demo the criterion asks for: an unauthorised attempt at a
+        // canonical entry, rejected.
+        let mut e = squatted();
+        assert_eq!(
+            e.claim_canonical(REAL, [0x99; 32], T1).unwrap_err(),
+            RegistryError::ArtifactMismatch
+        );
+        assert_eq!(
+            e.author, SQUATTER,
+            "the squatter keeps an entry nobody can back"
+        );
+        assert!(!e.verification.is_verified());
+    }
+
+    #[test]
+    fn a_networked_rebuild_cannot_buy_the_entry() {
+        // Otherwise the takeover path becomes the attack: a build.rs that
+        // downloads the deployed binary reproduces it perfectly.
+        let mut e = squatted();
+        e.verification = Verification::claim(claim_for(false)).unwrap();
+        assert_eq!(
+            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
+            RegistryError::NetworkedBuild
+        );
+        assert_eq!(e.author, SQUATTER);
+    }
+
+    #[test]
+    fn a_verified_entry_cannot_be_taken_from_its_author() {
+        // Once someone has demonstrated the build, the author is settled. A
+        // takeover that worked on a verified entry would be the attack rather
+        // than the defence against it.
+        let mut e = squatted();
+        e.claim_canonical(REAL, SUBJECT, T1).unwrap();
+
+        let third: AccountId = [0x44; 32];
+        assert_eq!(
+            e.claim_canonical(third, SUBJECT, T1).unwrap_err(),
+            RegistryError::AlreadyVerified
+        );
+        assert_eq!(e.author, REAL);
+    }
+
+    #[test]
+    fn a_third_party_entry_is_not_contestable() {
+        // It is keyed by its publisher, so it is theirs by construction and
+        // there is nothing to contest.
+        let mut e = Entry::new(
+            SUBJECT,
+            T0,
+            "someone's opinion".into(),
+            "1.0.0".into(),
+            SQUATTER,
+            Publisher::ThirdParty,
+        )
+        .unwrap();
+        e.verification = Verification::claim(claim_for(true)).unwrap();
+        assert_eq!(
+            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
+            RegistryError::NotAuthor
+        );
+    }
+
+    #[test]
+    fn a_frozen_entry_is_not_contestable_either() {
+        let mut e = squatted();
+        e.freeze(&SQUATTER).unwrap();
+        assert_eq!(
+            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
+            RegistryError::Immutable
+        );
+    }
+}

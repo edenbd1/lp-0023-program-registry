@@ -508,6 +508,82 @@ mod lez_registry {
         ))
     }
 
+    /// Take a canonical entry by proving you can rebuild what is deployed.
+    ///
+    /// LEZ has no deploy authority — deployment is content-addressed and
+    /// permissionless — so the construction this criterion is modelled on has no
+    /// counterpart. First-come would be front-runnable, which the prize names as
+    /// broken. So the canonical slot is takeable, and what takes it is the one
+    /// thing a squatter cannot fake: an offline rebuild reproducing the deployed
+    /// bytecode.
+    ///
+    /// Callable by anyone, which is the point. A squatter can hold an entry
+    /// nobody can back; they cannot hold one against someone with the source.
+    #[instruction]
+    pub fn claim_canonical(
+        ctx: ProgramContext,
+        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
+        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
+        clock: AccountWithMetadata,
+        #[account(signer)] challenger: AccountWithMetadata,
+        entry_seed: [u8; 32],
+        rebuilt: [u8; 32],
+    ) -> SpelResult {
+        let _ = entry_seed;
+        if entry.account.program_owner != ctx.self_program_id
+            || global.account.program_owner != ctx.self_program_id
+        {
+            return Err(SpelError::custom(
+                E_NOT_ANCHORED,
+                "entry or global state is not owned by this program",
+            ));
+        }
+        let mut e = load_entry(&entry.account)?;
+        let stamp = read_clock(&clock)?;
+        e.claim_canonical(*challenger.account_id.value(), rebuilt, stamp)
+            .map_err(|err| match err {
+                lez_registry_core::RegistryError::ArtifactMismatch => SpelError::custom(
+                    E_NOT_VERIFIED,
+                    "the rebuild does not reproduce this entry's bytecode",
+                ),
+                lez_registry_core::RegistryError::NetworkedBuild => SpelError::custom(
+                    E_NOT_VERIFIED,
+                    "the claimed build ran with the network up, so it buys nothing",
+                ),
+                lez_registry_core::RegistryError::AlreadyVerified => SpelError::custom(
+                    E_NOT_AUTHOR,
+                    "this entry is verified; its author is settled",
+                ),
+                lez_registry_core::RegistryError::Immutable => {
+                    SpelError::custom(E_IMMUTABLE, "entry is frozen")
+                }
+                lez_registry_core::RegistryError::NotAuthor => SpelError::custom(
+                    E_NOT_AUTHOR,
+                    "a third-party entry is keyed by its publisher and is not contestable",
+                ),
+                _ => SpelError::custom(E_BAD_CLAIM, "no source claim to rebuild"),
+            })?;
+        store_entry(&mut entry.account, &e)?;
+
+        // A takeover turns an unverified entry into a verified one, so the
+        // counter moves exactly once here -- the entry could not have been
+        // verified before, or the takeover would have been refused.
+        let mut g = GlobalAccount::try_from_slice(&global.account.data)
+            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
+        g.total_verified = g
+            .total_verified
+            .checked_add(1)
+            .ok_or_else(|| SpelError::custom(E_BAD_ENTRY, "verified counter overflow"))?;
+        let bytes = borsh::to_vec(&g)
+            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
+        write(&mut global.account, &bytes)?;
+
+        Ok(SpelOutput::execute(
+            vec![entry, global, clock, challenger],
+            vec![],
+        ))
+    }
+
     /// Freeze an entry. One-way: no instruction in this program lowers the flag,
     /// which is the only thing that makes immutability worth anything.
     #[instruction]

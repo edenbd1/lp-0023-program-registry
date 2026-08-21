@@ -419,6 +419,79 @@ impl Entry {
 
     /// Only the recorded author may change an entry, and only while it is not
     /// frozen. Both checks live here so no instruction can forget one.
+    /// Take the canonical entry by proving you can rebuild what is deployed.
+    ///
+    /// LEZ has no deploy authority. Deployment is content-addressed and
+    /// permissionless, so nobody owns a program id and no on-chain fact says who
+    /// published one — which means "canonical = the upgrade authority", the
+    /// construction this criterion is modelled on, has no counterpart here.
+    ///
+    /// First-come would be the easy answer and the prize names it as broken: an
+    /// attacker registers a popular program id under a plausible name before its
+    /// author does, and permanently owns the entry wallets display.
+    ///
+    /// So the canonical slot is *takeable*, and what takes it is the one thing a
+    /// squatter cannot fake: an offline rebuild that reproduces the deployed
+    /// bytecode. On a content-addressed chain the party who can produce the
+    /// bytes from source is the closest thing to an authority that exists, and
+    /// it is a stronger claim than a deploy signature, which only proves someone
+    /// pressed a button.
+    ///
+    /// Once an entry is verified the author is settled: a later challenger
+    /// cannot displace a claim that was actually demonstrated, or the takeover
+    /// path would itself become the attack.
+    ///
+    /// # What this does not do
+    ///
+    /// It does not identify the program's real author, and it must not be read
+    /// that way. Source is usually public, so a squatter who points at the real
+    /// repository can rebuild it as readily as its maintainer, and would then
+    /// hold the slot. What changes is what holding the slot is worth: an entry
+    /// cannot be *verified* while naming a repository that does not build it, so
+    /// the name, the description and the source on a verified canonical entry are
+    /// accurate even when the account holding it is a stranger.
+    ///
+    /// That is the property a wallet user actually needs — "does this bytecode
+    /// come from that source" — and it is answered correctly regardless of who
+    /// won the race. Authorship here is *demonstrated capability*, not identity,
+    /// and [`Verification::is_self_attested`] is what tells a reader which one
+    /// they are looking at. Solving identity would need something this chain does
+    /// not have.
+    pub fn claim_canonical(
+        &mut self,
+        challenger: AccountId,
+        rebuilt: ProgramId,
+        at: Stamp,
+    ) -> Result<()> {
+        if self.frozen {
+            return Err(RegistryError::Immutable);
+        }
+        if !matches!(self.publisher, Publisher::Canonical) {
+            // A third-party entry is keyed by its publisher and is theirs by
+            // construction. There is nothing to contest.
+            return Err(RegistryError::NotAuthor);
+        }
+        if self.verification.is_verified() {
+            return Err(RegistryError::AlreadyVerified);
+        }
+        let claim = match &self.verification.claim {
+            Some(c) => c,
+            None => return Err(RegistryError::Empty),
+        };
+        if !claim.build.network_disabled {
+            // A networked rebuild proves nothing, so it cannot buy the entry.
+            return Err(RegistryError::NetworkedBuild);
+        }
+        if rebuilt != self.program_id {
+            return Err(RegistryError::ArtifactMismatch);
+        }
+        self.author = challenger;
+        self.verification.state = VerificationState::Verified;
+        self.verification.attester = Some(challenger);
+        self.verification.last_checked = Some(at);
+        Ok(())
+    }
+
     pub fn require_writable_by(&self, caller: &AccountId) -> Result<()> {
         if self.frozen {
             return Err(RegistryError::Immutable);

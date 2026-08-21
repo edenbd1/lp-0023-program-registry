@@ -34,14 +34,31 @@ button. Front-running gains nothing durable: a squatter can occupy the canonical
 address, but cannot make it *verified*, because they cannot produce a matching
 offline rebuild without the real source.
 
-**Current state, stated plainly:** the two derivations exist and the program
-re-derives the seed it is given, so an entry cannot be placed at an address the
-derivation does not produce. The authority binding above is designed and **not
-yet implemented** — today a canonical entry is first-come, and its trust comes
-from the verification state next to it rather than from who holds it. Until the
-binding lands, a canonical entry that is not `Verified` should be read as "someone
-registered this", nothing more, and the UI says so. See
-[criteria-evidence.md](criteria-evidence.md) #3.
+**Implemented**, as `claim_canonical`: a canonical entry that is not yet verified
+can be taken by any account that submits a rebuild reproducing the deployed
+bytecode from a claim whose build was offline. A verified entry cannot be taken,
+or the takeover path would itself become the attack.
+
+**And here is what it does not do**, because the honest version of this position
+is worth more than the flattering one.
+
+It does not identify the program's real author. Source is usually public, so a
+squatter who points at the real repository can rebuild it as readily as its
+maintainer, and would then hold the slot. First-to-verify replaces
+first-to-register, which is better — a squatter must at least do real work and
+tell the truth about where the code is — but it is not "the author wins".
+
+What changes is what holding the slot is *worth*. An entry cannot be verified
+while naming a repository that does not build it, so on a **verified** canonical
+entry the name, the description and the source URL are accurate even when the
+account holding it is a stranger. That is the property a wallet user actually
+needs — does this bytecode come from that source — and it is answered correctly
+regardless of who won the race.
+
+Authorship here is therefore **demonstrated capability, not identity**, and
+`is_self_attested` is what tells a reader which of the two they are looking at.
+Identity would need something this chain does not have: a deploy authority, or an
+off-chain attestation the registry would then have to trust.
 
 ## 0b. Staleness, and why there is no `Stale` state
 
