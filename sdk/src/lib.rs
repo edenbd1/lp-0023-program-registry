@@ -192,14 +192,15 @@ impl Client {
             .map_err(|e| Error::Malformed(e.to_string()))
     }
 
-    /// Which program registered `n`th, if anything did.
-    pub fn program_at(&self, n: u64) -> Result<Option<ProgramId>> {
+    /// What registered `n`th, if anything did: the program id and the seed of
+    /// the entry it created.
+    pub fn slot_at(&self, n: u64) -> Result<Option<core_::DirectorySlot>> {
         let addr = directory_address(&self.registry, n);
         let Some(raw) = self.account_data(&addr)? else {
             return Ok(None);
         };
         borsh::from_slice::<core_::DirectorySlot>(&raw)
-            .map(|s| Some(s.program_id))
+            .map(Some)
             .map_err(|e| Error::Malformed(e.to_string()))
     }
 
@@ -213,10 +214,14 @@ impl Client {
         let total = self.global()?.map_or(0, |g| g.total_entries);
         let mut out = Vec::new();
         for n in 0..total {
-            let Some(program) = self.program_at(n)? else {
+            let Some(slot) = self.slot_at(n)? else {
                 continue;
             };
-            if let Some(entry) = self.entry(&program)? {
+            // The slot's seed, not the program id: deriving from the program id
+            // would resolve every third-party entry to the canonical one and
+            // quietly drop it from the listing.
+            let addr = pda(&self.registry, &slot.entry_seed);
+            if let Some(entry) = self.entry_at(&addr)? {
                 out.push(entry);
             }
         }

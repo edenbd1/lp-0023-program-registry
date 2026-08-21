@@ -531,8 +531,16 @@ pub fn seq_seed(n: u64) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// One slot of the sequence directory: which program registered `n`th.
+/// One slot of the sequence directory: what registered `n`th, and where it lives.
+///
+/// The seed is stored as well as the program id, and it has to be. A program id
+/// alone only leads back to the *canonical* entry, so an indexer walking the
+/// directory would silently skip every third-party entry — and third-party
+/// entries are exactly the ones a registry must not be able to hide. Found by
+/// walking a registry that held one and getting the canonical entry back twice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct DirectorySlot {
     pub program_id: ProgramId,
+    /// The seed of the entry account this registration created.
+    pub entry_seed: [u8; 32],
 }

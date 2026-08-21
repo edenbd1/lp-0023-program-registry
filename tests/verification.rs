@@ -424,10 +424,23 @@ fn the_sequence_directory_makes_the_registry_walkable_without_enumeration() {
 }
 
 #[test]
-fn a_directory_slot_survives_a_round_trip() {
+fn a_directory_slot_carries_the_seed_so_third_party_entries_are_reachable() {
     let slot = DirectorySlot {
         program_id: [3u8; 32],
+        entry_seed: entry_seed(&[3u8; 32]),
     };
     let bytes = borsh::to_vec(&slot).unwrap();
     assert_eq!(borsh::from_slice::<DirectorySlot>(&bytes).unwrap(), slot);
+
+    // A slot holding only the program id would send every walker to the
+    // canonical entry, so a third-party entry would vanish from the listing --
+    // exactly the entries a registry must not be able to hide.
+    let third = DirectorySlot {
+        program_id: [3u8; 32],
+        entry_seed: third_party_entry_seed(&[3u8; 32], &[9u8; 32]),
+    };
+    assert_ne!(
+        slot.entry_seed, third.entry_seed,
+        "two entries about one program must lead to two different accounts"
+    );
 }

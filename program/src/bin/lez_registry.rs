@@ -126,6 +126,7 @@ pub struct EntryAccount {
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
 pub struct DirectoryAccount {
     pub program_id: [u8; 32],
+    pub entry_seed: [u8; 32],
 }
 
 /// Registry-wide counters.
@@ -266,8 +267,11 @@ mod lez_registry {
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
         store_entry(&mut entry.account, &e)?;
 
-        let slot = borsh::to_vec(&DirectoryAccount { program_id })
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "directory slot failed to encode"))?;
+        let slot = borsh::to_vec(&DirectoryAccount {
+            program_id,
+            entry_seed,
+        })
+        .map_err(|_| SpelError::custom(E_BAD_ENTRY, "directory slot failed to encode"))?;
         write(&mut directory.account, &slot)?;
 
         g.total_entries = g
