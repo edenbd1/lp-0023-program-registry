@@ -8,16 +8,16 @@ Built **sealed** — every build container had its network disabled.
 
 | | |
 |---|---|
-| ProgramId (RISC0 ImageID) | `28cb7f6e89e6a750f7f182a927d06d7984728a4843806df0dd862f3581af4710` |
-| deployment digest | `10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26` |
-| deploy transaction | [`10d172fd…607baa26`](https://explorer.testnet.lez.logos.co/transaction/10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26) · block 17553 |
-| global state | `CoXDXzQcbtw1mnLwXPcGrw29afBDxkAHPh48ZPkscvBj` |
-| canonical entry (itself) | `BJp44fYg2Aaypd68fLQcRAsLhdjY379FN3BFQGfDMJ4n` |
+| ProgramId (RISC0 ImageID) | `17c7ec55940d057d2ad1a95b0ede97d29ede1d310dcd35de9e09df2e214c0c30` |
+| deployment digest | `2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94` |
+| deploy transaction | [`2ff83da8…be7ebb94`](https://explorer.testnet.lez.logos.co/transaction/2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94) · block 17589 |
+| global state | `42MaszdnoXcWkDZBgNJZVyP26TtD47sBxNLkXnmmr5Dj` |
+| canonical entry (itself) | `2YpaP2aWgAqx9uVHQ4yoAsp7jtt672SR4qyTJrGdq3gR` |
 
 ### All five verification states, live, and each one true
 
 Reproduce the whole set with
-`REGISTRY=28cb7f6e89e6a750f7f182a927d06d7984728a4843806df0dd862f3581af4710 ./scripts/populate-demo.sh`.
+`REGISTRY=17c7ec55940d057d2ad1a95b0ede97d29ede1d310dcd35de9e09df2e214c0c30 ./scripts/populate-demo.sh`.
 
 | slot | name | state | why it is that state |
 |---|---|---|---|
