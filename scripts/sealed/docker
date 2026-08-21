@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# A `docker` that forces build containers off the network.
+#
+# cargo-risczero shells out to docker and offers no way to pass --network, so
+# the flag is added here and this directory is put first on PATH for the build.
+# Everything that is not a build passes through untouched.
+REAL="${SEALED_REAL_DOCKER:-/usr/local/bin/docker}"
+if [ "${1:-}" = "build" ]; then
+  shift; exec "$REAL" build --network none "$@"
+fi
+if [ "${1:-}" = "buildx" ] && [ "${2:-}" = "build" ]; then
+  shift 2; exec "$REAL" buildx build --network none "$@"
+fi
+exec "$REAL" "$@"

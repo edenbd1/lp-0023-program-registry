@@ -396,9 +396,15 @@ pub fn third_party_entry_seed(program_id: &ProgramId, publisher: &AccountId) -> 
 /// The singleton global-state seed.
 #[must_use]
 pub fn global_seed() -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(GLOBAL_SEED);
-    h.finalize().into()
+    // NOT a hash of GLOBAL_SEED, though it was one until the SDK derived an
+    // address the chain had nothing at. The program declares this account as
+    // `pda = [literal("lez-registry:global:v1")]`, and SPEL turns a literal seed
+    // into 32 bytes by right-padding with zeroes rather than by hashing. Hashing
+    // here produced a perfectly well-formed address that simply was not the one
+    // the program writes to -- the failure mode a derivation bug always has.
+    let mut seed = [0u8; 32];
+    seed[..GLOBAL_SEED.len()].copy_from_slice(GLOBAL_SEED);
+    seed
 }
 
 /// The content address of a **deployment**: `SHA256(u32_le(len) ‖ bytecode)`.
