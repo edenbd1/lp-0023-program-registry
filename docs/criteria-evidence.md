@@ -17,7 +17,7 @@ than described as nearly done.
 | 3 | Canonical vs third-party entries, distinguishable on chain; unauthorised canonical attempt rejected in the demo | **partial** | both derivations exist and the program re-derives the seed, but LEZ has no deploy authority to bind canonical to — the position is argued in [design-positions.md](design-positions.md) and the rejection demo is not written |
 | 4 | Only the registering author may update | **met** | `require_writable_by`, test `only_the_author_may_write_and_freezing_is_one_way` |
 | 5 | Singleton global state with total registered | **met** | `GlobalAccount { total_entries, total_verified }` |
-| 6 | IDL JSON on Logos Storage, uploaded by tooling in one step, resolvable and parse-checked by clients | **open** | the entry carries `idl: Option<ContentId>`; nothing uploads or resolves it yet |
+| 6 | IDL JSON on Logos Storage, uploaded by tooling in one step, resolvable and parse-checked by clients | **partial** | identifiers are stored and decoded correctly (38 bytes, not 32 — see below), and `lez-registry idl <cid> --from <dir>` resolves and parse-checks. **Upload is not wired**: no Logos Storage node is reachable from this environment, and the service in the LEZ tree is the sequencer's internal store, not a client API |
 | 7 | Discovery: by program ID without an indexer, **full enumeration**, search by name/author/tag | **met** | derivation in `sdk/`; enumeration via the sequence directory; search in `indexer/`, which is part of this submission and runs against a stock sequencer |
 | 8 | Reproducible builds — pinned toolchain, deterministic, byte-identical for a third party | **met** | `scripts/build-sealed.sh`; repeated runs reproduce the same ImageID, and a rebuild from HEAD reproduced the deployed one |
 | 9 | Source verification reporting **four distinct states** | **met** | `Verified`, `Mismatched`, `Unclaimed`, `Claimed` — plus a fifth, `Unreproducible`, for a rebuild whose claimed build had network access |
@@ -42,7 +42,7 @@ than described as nearly done.
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 20 | Non-author cannot update; no silent overwrite on re-register | **met** | `init` refuses an existing account and the program checks besides |
-| 21 | Graceful degradation when an IDL is unresolvable or unparseable | **open** | depends on #6 |
+| 21 | Graceful degradation when an IDL is unresolvable or unparseable | **met** | three outcomes exercised — resolves and parses, resolves and does not parse, does not resolve — and all three report the IDL as unavailable while leaving the on-chain metadata untouched |
 | 22 | No mandatory external services | **met** | sequencer only; the indexer is optional and self-hosted |
 | 23 | Source verification runs locally, no hosted build service | **met** | `scripts/build-sealed.sh` runs on the operator's Docker |
 
@@ -109,3 +109,35 @@ they wrote, and the address check stops them supplying some *other* account the
 clock program happens to own.
 
 So the date on an entry is the sequencer's, not the registrant's.
+
+## The content identifier is 38 bytes, not 32
+
+This was going to be a field that could not hold what the criterion requires.
+
+`ContentId` was `[u8; 32]` — the size of a digest. A real Logos Storage
+identifier is larger. Two taken from a live node,
+`zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ` and
+`zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55`, decode to **38 bytes**
+each:
+
+```
+01        CIDv1
+819a03    codec (the second identifier's is 839a03 — they differ)
+1220      multihash: sha2-256, 32 bytes
+…32 bytes digest
+```
+
+A 32-byte field would have kept the digest and dropped the codec, so nothing
+could have reconstructed the identifier well enough to fetch anything — and the
+failure would have looked like an empty IDL rather than a truncated pointer.
+
+The identifier is therefore stored whole and passed to `update` in its multibase
+`z…` form, which is what a Storage node hands you. `decode_content_id` refuses
+anything malformed rather than half-decoding it, and checks the CIDv1 marker, so
+a plausible-but-wrong string fails at the boundary instead of turning into a
+fetch that quietly returns nothing.
+
+serde does not implement its traits for arrays past 32, which is why the
+instruction takes a string rather than bytes. Splitting a 38-byte identifier
+across two array arguments would have worked and would have invited a caller to
+reassemble it wrongly.

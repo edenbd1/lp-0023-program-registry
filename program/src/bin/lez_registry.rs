@@ -299,7 +299,7 @@ mod lez_registry {
         entry_seed: [u8; 32],
         version: String,
         description: String,
-        idl: [u8; 32],
+        idl: String,
     ) -> SpelResult {
         let _ = entry_seed;
         if entry.account.program_owner != ctx.self_program_id {
@@ -319,10 +319,25 @@ mod lez_registry {
 
         e.version = version;
         e.description = description;
-        // An all-zero identifier means "no IDL", which is distinguishable from a
-        // real Storage identifier because Storage identifiers are content
-        // hashes and a hash of anything is not zero.
-        e.idl = if idl == [0u8; 32] { None } else { Some(idl) };
+        // All-zero means "no IDL", which is distinguishable from a real
+        // identifier because every real one starts with the CIDv1 marker 0x01.
+        // Taken as the multibase string a Logos Storage node actually hands
+        // you, rather than as raw bytes: serde does not implement arrays past
+        // 32, and splitting a 38-byte identifier across two arguments would
+        // invite a caller to reassemble it wrongly. Empty clears the pointer.
+        e.idl = if idl.is_empty() {
+            None
+        } else {
+            match lez_registry_core::decode_content_id(&idl) {
+                Some(id) => Some(id),
+                None => {
+                    return Err(SpelError::custom(
+                        E_BAD_ENTRY,
+                        "idl is not a multibase base58btc content identifier",
+                    ))
+                }
+            }
+        };
         e.validate()
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
         store_entry(&mut entry.account, &e)?;

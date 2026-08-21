@@ -68,7 +68,23 @@ pub struct Stamp {
 /// A Logos Storage content identifier. The registry stores only this on chain;
 /// the IDL JSON itself lives in Storage, because an IDL is kilobytes and an
 /// on-chain kilobyte is paid for by everyone who syncs the zone.
-pub type ContentId = [u8; 32];
+pub type ContentId = [u8; CONTENT_ID_LEN];
+
+/// Length of a Logos Storage content identifier, in bytes.
+///
+/// **38, not 32**, and the difference is not academic: a real identifier decodes
+/// to `01` (CIDv1) ‖ a varint codec ‖ a multihash, and the multihash carries its
+/// own code and length before the 32-byte digest. Two live examples from a Logos
+/// Storage node —
+/// `zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ` and
+/// `zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55` — decode to 38 bytes
+/// each, with different codecs (`819a03`, `839a03`).
+///
+/// A 32-byte field would have held the digest and silently dropped the codec, so
+/// nothing could reconstruct the identifier well enough to fetch anything. The
+/// bytes are stored whole and rendered as multibase base58btc (a leading `z`),
+/// which is the form a Storage node accepts.
+pub const CONTENT_ID_LEN: usize = 38;
 
 /// Every way the registry refuses. Each maps to one documented on-chain error
 /// code; none of them is "an error occurred".
@@ -543,4 +559,75 @@ pub struct DirectorySlot {
     pub program_id: ProgramId,
     /// The seed of the entry account this registration created.
     pub entry_seed: [u8; 32],
+}
+
+/// Decode a multibase base58btc string — the `z…` form a Logos Storage node
+/// hands you — into content-identifier bytes.
+///
+/// `no_std` and allocation-free: the output is fixed-size because a content
+/// identifier is. Returns `None` rather than a partial result on anything
+/// malformed, since a half-decoded identifier fetches the wrong object or
+/// nothing, and both are worse than an error.
+#[must_use]
+pub fn decode_content_id(multibase: &str) -> Option<ContentId> {
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let bytes = multibase.as_bytes();
+    // The leading `z` is multibase's tag for base58btc. Anything else is a
+    // different encoding and guessing would be worse than refusing.
+    if bytes.first() != Some(&b'z') {
+        return None;
+    }
+    let mut out = [0u8; CONTENT_ID_LEN];
+    let mut len = 0usize;
+    for &c in &bytes[1..] {
+        let mut carry = ALPHABET.iter().position(|a| *a == c)?;
+        for byte in out[..len].iter_mut().rev() {
+            carry += 58 * (*byte as usize);
+            *byte = (carry & 0xFF) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            if len >= CONTENT_ID_LEN {
+                // Longer than a content identifier can be. Refuse rather than
+                // truncate: a truncated identifier is a valid-looking one that
+                // points somewhere else.
+                return None;
+            }
+            // Shift the accumulated bytes right to make room at the front.
+            let mut i = len;
+            while i > 0 {
+                out[i] = out[i - 1];
+                i -= 1;
+            }
+            out[0] = (carry & 0xFF) as u8;
+            len += 1;
+            carry >>= 8;
+        }
+    }
+    // Leading zero bytes encode as '1' and carry no value through the loop above.
+    for &c in &bytes[1..] {
+        if c != b'1' {
+            break;
+        }
+        if len >= CONTENT_ID_LEN {
+            return None;
+        }
+        let mut i = len;
+        while i > 0 {
+            out[i] = out[i - 1];
+            i -= 1;
+        }
+        out[0] = 0;
+        len += 1;
+    }
+    if len != CONTENT_ID_LEN {
+        return None;
+    }
+    // Every Logos Storage identifier is a CIDv1, so the first byte is 0x01.
+    // Checking it turns a plausible-but-wrong string into an error here rather
+    // than into a fetch that returns nothing later.
+    if out[0] != 0x01 {
+        return None;
+    }
+    Some(out)
 }

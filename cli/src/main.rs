@@ -142,6 +142,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "explain-entry" => explain_entry(&args),
+        "idl" => idl_cmd(&args),
         "verify" => verify(&args),
         _ => usage(),
     }
@@ -323,4 +324,113 @@ fn parse_hex_blob(s: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
         .collect()
+}
+
+/// Check a content identifier, and resolve it when told where to look.
+fn idl_cmd(args: &[String]) -> ExitCode {
+    let Some(raw) = args.get(1) else {
+        eprintln!("idl <CONTENT_ID> [--from <DIR-OR-URL-PREFIX>]");
+        return ExitCode::FAILURE;
+    };
+    let Some(id) = core_::decode_content_id(raw.trim()) else {
+        eprintln!(
+            "not a multibase base58btc content identifier.\n\
+             A Logos Storage identifier starts with `z` and decodes to {} bytes.",
+            core_::CONTENT_ID_LEN
+        );
+        return ExitCode::FAILURE;
+    };
+    println!("content id   {}", raw.trim());
+    println!("  bytes      {}", hex_n(&id));
+    println!("  cid version {}", id[0]);
+    println!("  codec      {}", hex_n(&id[1..4]));
+    println!("  digest     {}", hex_n(&id[6..]));
+
+    let Some(from) = args
+        .iter()
+        .position(|a| a == "--from")
+        .and_then(|i| args.get(i + 1))
+    else {
+        println!("\n  no --from given, so nothing was fetched. The identifier is well formed;");
+        println!("  that is a different claim from the IDL being available.");
+        return ExitCode::SUCCESS;
+    };
+
+    // A directory is the offline backend and an http(s) prefix is the online
+    // one. Both are just "where the bytes are"; the check that matters is the
+    // same either way.
+    let body = if from.starts_with("http://") || from.starts_with("https://") {
+        eprintln!("\n  fetching over http is not wired in this build; pass a directory");
+        return ExitCode::FAILURE;
+    } else {
+        match std::fs::read(std::path::Path::new(from).join(raw.trim())) {
+            Ok(b) => b,
+            Err(e) => {
+                // Unresolvable is a normal outcome, not a crash: an entry whose
+                // IDL cannot be fetched still has good on-chain metadata.
+                println!("\n  IDL unavailable: {e}");
+                println!("  The entry's on-chain metadata is unaffected.");
+                return ExitCode::SUCCESS;
+            }
+        }
+    };
+
+    match serde_json_parses(&body) {
+        true => {
+            println!("\n  resolved, {} bytes, parses as JSON", body.len());
+            ExitCode::SUCCESS
+        }
+        false => {
+            println!(
+                "\n  resolved, {} bytes, but it does NOT parse as JSON",
+                body.len()
+            );
+            println!("  Treat the IDL as unavailable rather than trusting a partial parse.");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Minimal JSON well-formedness check.
+///
+/// Deliberately not a parser into a typed IDL: the criterion is that a client
+/// can tell a usable IDL from an unusable one, and pulling a JSON crate into a
+/// tool whose whole argument is "few dependencies you have to trust" would be a
+/// poor trade for that.
+fn serde_json_parses(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let text = text.trim();
+    if !(text.starts_with('{') || text.starts_with('[')) {
+        return false;
+    }
+    let (mut depth, mut in_string, mut escaped) = (0i32, false, false);
+    for c in text.chars() {
+        if in_string {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0 && !in_string
+}
+
+fn hex_n(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }

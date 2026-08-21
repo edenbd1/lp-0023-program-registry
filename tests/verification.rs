@@ -444,3 +444,48 @@ fn a_directory_slot_carries_the_seed_so_third_party_entries_are_reachable() {
         "two entries about one program must lead to two different accounts"
     );
 }
+
+#[test]
+fn a_real_logos_storage_identifier_round_trips() {
+    // Two identifiers from a live Logos Storage node. They decode to 38 bytes,
+    // not 32 -- CIDv1 marker, varint codec, then a multihash that carries its
+    // own code and length before the digest. A 32-byte field would have kept
+    // the digest and dropped the codec, leaving nothing able to fetch anything.
+    for cid in [
+        "zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ",
+        "zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55",
+    ] {
+        let got = decode_content_id(cid).expect("decodes");
+        assert_eq!(got.len(), CONTENT_ID_LEN);
+        assert_eq!(got[0], 0x01, "CIDv1 marker");
+    }
+
+    // The two differ in their codec bytes, which is exactly the part a 32-byte
+    // field would have discarded.
+    let a = decode_content_id("zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ").unwrap();
+    let b = decode_content_id("zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55").unwrap();
+    assert_ne!(&a[..4], &b[..4], "different codecs");
+}
+
+#[test]
+fn a_malformed_identifier_is_refused_rather_than_half_decoded() {
+    // A half-decoded identifier fetches the wrong object or nothing, and both
+    // are worse than an error.
+    assert!(decode_content_id("").is_none(), "empty");
+    assert!(
+        decode_content_id("QmDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9a").is_none(),
+        "not multibase base58btc"
+    );
+    assert!(
+        decode_content_id("zDvZRwzm9Ni32i").is_none(),
+        "too short to be a content identifier"
+    );
+    assert!(
+        decode_content_id("zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQQQQQ").is_none(),
+        "too long"
+    );
+    assert!(
+        decode_content_id("zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinf0").is_none(),
+        "0 is not in the base58 alphabet"
+    );
+}

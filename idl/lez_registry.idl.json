@@ -170,12 +170,7 @@
         },
         {
           "name": "idl",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
+          "type": "string"
         }
       ]
     },
