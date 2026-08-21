@@ -34,8 +34,11 @@ check() { # label tx expect_present
 }
 
 echo "registry on $RPC"
-check deploy         0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 yes
-check record-rebuild a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca yes
+check deploy         c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d yes
+check claim-source   222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0 yes
+check record-rebuild 5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4 yes
+check refusal-17428  a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca yes
+check build-17428    0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 yes
 # Every earlier build is a different program, not a stale link, so each stays
 # checkable. A row that stopped resolving would mean the chain lost it.
 check build-17342    447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604 yes
@@ -54,7 +57,7 @@ b=open(sys.argv[1],'rb').read()
 print(hashlib.sha256(struct.pack('<I',len(b))+b).hexdigest())
 PY
 )
-  if [ "$got" = 0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 ]; then
+  if [ "$got" = c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d ]; then
     printf '  OK   %-22s recomputes to the deploy transaction hash\n' "digest"
   else
     printf '  FAIL %-22s got %s\n' "digest" "$got"

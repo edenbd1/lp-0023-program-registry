@@ -4,23 +4,65 @@ Public LEZ testnet, `https://testnet.lez.logos.co`.
 
 ## The live registry
 
+Built **sealed** — every build container had its network disabled.
+
 | | |
 |---|---|
-| ProgramId (RISC0 ImageID) | `145c111d0e8195f83483c10130221397fc11ef629efc89dbb414bcc9ee3cc8fd` |
-| deployment digest | `0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899` |
-| deploy transaction | [`0fe6f57a…d087a92899`](https://explorer.testnet.lez.logos.co/transaction/0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899) · block 17428 |
-| `record_rebuild` | [`a4d2b101…219ae1ca`](https://explorer.testnet.lez.logos.co/transaction/a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca) |
-| global state | `CLAEqmgWsrYPPwja3Bwvc5pgN64yBKtwKv8b2KGQRgoF` |
-| canonical entry | `84NG6dyqNiARW9K1LvK1cE9CZWYNWj9H179yWLNihB1q` |
+| ProgramId (RISC0 ImageID) | `e1484f1447edd7669d1443154841160f4ddfe4c5d93d410527e5cf99ab9aacba` |
+| deployment digest | `c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d` |
+| deploy transaction | [`c1223c72…adac2a9d`](https://explorer.testnet.lez.logos.co/transaction/c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d) · block 17474 |
+| `claim_source` | [`222a7c1b…161fcbc0`](https://explorer.testnet.lez.logos.co/transaction/222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0) |
+| `record_rebuild` | [`5823f762…f3c966e4`](https://explorer.testnet.lez.logos.co/transaction/5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4) |
+| global state | `Bqu9zbwXpKA7QjcpZzr9zxjXNDeYPCFB4v9wLexi5oLu` |
+| canonical entry | `7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK` |
+
+### What it holds
+
+| slot | name | state |
+|---|---|---|
+| 0 | `lez-program-registry` | **verified**, self-attested |
+| 1 | `antumbra-curve` | unclaimed |
+| 2 | `antumbra-lbp` | unclaimed |
+| 3 | `antumbra-vesting` | unclaimed |
+
+`total_entries` 4, `total_verified` 1. The three Antumbra programs are
+registered as the prize requires and left `Unclaimed` rather than dressed up:
+their binaries were built with the network available, so there is nothing
+truthful to claim about them yet.
 
 `initialize`, `register` and `claim_source` also ran. Their transaction hashes are
 not the evidence and are not quoted: **the account contents are**. A hash proves a
 transaction was included, not that it did what you think — the two are different
 claims, and this project has been bitten by the difference twice. Read the state.
 
-## The refusal, on chain
+## Verified, and still not a tick
 
-This is the thesis of the registry, executed rather than asserted:
+```
+$ lez-registry explain-entry "$(spel inspect 7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK --type EntryAccount ...)"
+lez-program-registry 0.5.0
+  program id   e1484f1447edd7669d1443154841160f4ddfe4c5d93d410527e5cf99ab9aacba
+  author       bfd087578945b8a9434004c679e6225f1934f5ebf27b96fbec5a6ef2167b9e3c
+  publisher    canonical
+  verification verified — BY ITS OWN AUTHOR
+               The only party vouching for this build is the party
+               that shipped it. Useful, and not an independent check.
+  repository   https://github.com/edenbd1/lez-program-registry
+  toolchain    1.88.0
+  offline      true
+```
+
+`offline true` is the fact that earns the state, and it was earned rather than
+asserted: `scripts/build-sealed.sh` disables the network for every build
+container, so `claim_source` could record `network_disabled=1` without lying.
+
+The registry's own entry does not get a green check, because the only party
+vouching for this build is the party that shipped it. That is worth something and
+it is not an independent rebuild, and a UI that rendered both identically would
+hide the one difference that matters.
+
+## The same mechanism refusing, at block 17428
+
+An earlier deployment shows the other half, and it is worth keeping:
 
 ```
 $ lez-registry explain-entry "$(spel inspect 84NG6dyqNiARW9K1LvK1cE9CZWYNWj9H179yWLNihB1q --type EntryAccount ...)"
@@ -45,22 +87,33 @@ source. `total_verified` reads **0**, next to `total_entries` **1**.
 
 That zero is the deliverable. Any registry can print a tick.
 
-## Why nothing here is Verified yet
+## How the sealed build works, and what it cost to get there
 
-`cargo risczero build` offers no way to disable the build container's network —
-checked against its `--help` and against its binary, neither of which carries a
-`--network` option. So no rebuild we can currently perform is provably offline,
-so `claim_source` is recorded honestly with `network_disabled=0`, and the program
-does the rest.
+`cargo risczero build` has no `--network` option — checked against its `--help`
+and against its binary. But it shells out to `docker`, so `scripts/sealed/docker`
+intercepts the build call and adds `--network none`, and that directory goes first
+on `PATH` for the build.
 
-`scripts/verify-source.sh` reports exactly this rather than guessing. What the
-build does establish: it is **deterministic** — two independent runs over
-identical source produced the same ImageID — and it runs inside one pinned
-builder image, `risczero/risc0-guest-builder:r0.1.88.0`,
+The first attempt failed exactly where it should: at
+`cargo +risc0 fetch --locked`, the step that reaches the network. Vendoring turns
+that fetch into a no-op, which is what makes an offline build possible at all.
+
+Two phases, deliberately separate:
+
+1. **Fetch, with the network.** `cargo vendor` resolves every dependency and
+   checks it against hashes already in `Cargo.lock`, so it cannot introduce a
+   crate the lockfile did not pin.
+2. **Build, with no network at all.** The container cannot reach anything, so a
+   `build.rs` cannot download the artifact it is meant to reproduce.
+
+The sealed build is **deterministic** — repeated runs produce the same ImageID —
+and runs inside one pinned builder image,
+`risczero/risc0-guest-builder:r0.1.88.0`,
 `sha256:3e12f71bacd27527a61dea96fa0e53e468c99aa261d3a1019b593f6dbd943eb3`.
 
-What closes the gap: `cargo risczero build --network=none`, or a guest Dockerfile
-using `RUN --network=none` over vendored dependencies.
+It is **not** the same ImageID as a networked build of the same source, because
+vendoring changes the paths compiled into the ELF. So the sealed build is the
+canonical one: a binary nobody can reproduce offline is not worth deploying.
 
 ## The digest predicted the transaction hash, four times
 
