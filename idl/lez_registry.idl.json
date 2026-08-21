@@ -1,0 +1,222 @@
+{
+  "version": "0.1.0",
+  "name": "lez_registry",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        {
+          "name": "global",
+          "writable": true,
+          "signer": false,
+          "init": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": "lez-registry:global:v1"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register",
+      "accounts": [
+        {
+          "name": "entry",
+          "writable": true,
+          "signer": false,
+          "init": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "entry_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": "lez-registry:global:v1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "author",
+          "writable": false,
+          "signer": true,
+          "init": false
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "program_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "canonical",
+          "type": "u8"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "accounts": [
+        {
+          "name": "entry",
+          "writable": false,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "entry_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "author",
+          "writable": false,
+          "signer": true,
+          "init": false
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "idl",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "freeze",
+      "accounts": [
+        {
+          "name": "entry",
+          "writable": false,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "entry_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "author",
+          "writable": false,
+          "signer": true,
+          "init": false
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "EntryAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "entry",
+            "type": {
+              "vec": "u8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "total_entries",
+            "type": "u64"
+          },
+          {
+            "name": "total_verified",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}
