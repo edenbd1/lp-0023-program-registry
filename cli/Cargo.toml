@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 lez-registry-core = { path = ".." }
 sha2 = "0.10"
+borsh = { version = "1", features = ["derive"] }
 
 [profile.release]
 overflow-checks = true

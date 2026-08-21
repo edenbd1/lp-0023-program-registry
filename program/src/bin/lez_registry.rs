@@ -309,25 +309,42 @@ mod lez_registry {
             e.verification
                 .record_rebuild(rebuilt, subject, *attester.account_id.value());
 
-        // A networked build is refused *and* recorded: the state moves to
-        // Unreproducible and names who tried, so the attempt is not invisible to
-        // the next caller. Persist before returning the error.
+        // Returning Err here would discard the write: an erroring instruction
+        // aborts the transaction, so the post-state never lands. That was this
+        // instruction's first shape, and reading the account back after a
+        // refusal showed the entry still `Claimed` with no attester -- the
+        // "recorded refusal" existed only in the source.
+        //
+        // So the two outcomes are split by whether there is anything to record.
+        // A networked build IS an outcome: Unreproducible, with the attester
+        // named, committed by returning Ok. Nobody can grief an entry this way,
+        // because the verdict is a function of the claim the author wrote --
+        // anyone reading it can already see the build was networked.
+        let networked = matches!(
+            outcome,
+            Err(lez_registry_core::RegistryError::NetworkedBuild)
+        );
         if let Err(err) = outcome {
-            store_entry(&mut entry.account, &e)?;
-            return match err {
-                lez_registry_core::RegistryError::NetworkedBuild => Err(SpelError::custom(
-                    E_NOT_VERIFIED,
-                    "the claimed build ran with the network up",
-                )),
-                lez_registry_core::RegistryError::ArtifactMismatch => Err(SpelError::custom(
-                    E_NOT_VERIFIED,
-                    "the rebuild does not reproduce this entry's bytecode",
-                )),
-                _ => Err(SpelError::custom(E_BAD_CLAIM, "no claim to rebuild")),
-            };
+            if !networked {
+                // A mismatch or a missing claim changes no state, so there is
+                // nothing to persist and the caller should be told plainly.
+                return match err {
+                    lez_registry_core::RegistryError::ArtifactMismatch => Err(SpelError::custom(
+                        E_NOT_VERIFIED,
+                        "the rebuild does not reproduce this entry's bytecode",
+                    )),
+                    _ => Err(SpelError::custom(E_BAD_CLAIM, "no claim to rebuild")),
+                };
+            }
         }
 
         store_entry(&mut entry.account, &e)?;
+
+        if networked {
+            // Deliberately not counted: Unreproducible is not a verification,
+            // and total_verified must never move for one.
+            return Ok(SpelOutput::execute(vec![entry, attester], vec![]));
+        }
 
         // Only the transition counts. Re-attesting an already-verified entry adds
         // an attester, not a verified program, and a counter that grew each time

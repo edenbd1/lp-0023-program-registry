@@ -141,6 +141,7 @@ fn main() -> ExitCode {
             println!("  base58 {}", to_base58(&seed));
             ExitCode::SUCCESS
         }
+        "explain-entry" => explain_entry(&args),
         "verify" => verify(&args),
         _ => usage(),
     }
@@ -206,4 +207,94 @@ The second is not the first. This tool checks the second and says so."
 
 fn hex(b: &[u8; 32]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// Decode an entry and report what its state supports, rather than whether it
+/// carries a badge.
+fn explain_entry(args: &[String]) -> ExitCode {
+    let Some(raw) = args.get(1) else {
+        eprintln!("explain-entry <HEX> — the `entry` field from `spel inspect --type EntryAccount`");
+        return ExitCode::FAILURE;
+    };
+    let bytes = match parse_hex_blob(raw.trim()) {
+        Some(b) => b,
+        None => {
+            eprintln!("not hex");
+            return ExitCode::FAILURE;
+        }
+    };
+    let e: core_::Entry = match borsh::from_slice(&bytes) {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("does not decode as an Entry: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!("{} {}", e.name, e.version);
+    println!("  program id   {}", hex(&e.program_id));
+    println!("  author       {}", hex(&e.author));
+    println!(
+        "  publisher    {}",
+        match e.publisher {
+            core_::Publisher::Canonical => "canonical",
+            core_::Publisher::ThirdParty => "third party",
+        }
+    );
+    if e.frozen {
+        println!("  frozen       yes — metadata is immutable");
+    }
+
+    match &e.verification.state {
+        core_::VerificationState::Unclaimed => {
+            println!("  verification unclaimed");
+            println!("               Nobody has said where the source is. This is the honest");
+            println!("               default, not a failure.");
+        }
+        core_::VerificationState::Claimed => {
+            println!("  verification claimed, NOT verified");
+            println!("               A source is asserted and nobody has rebuilt it. Typing a");
+            println!("               URL is not evidence.");
+        }
+        core_::VerificationState::Unreproducible => {
+            println!("  verification unreproducible");
+            println!("               A rebuild was recorded but the claimed build had network");
+            println!("               access, so a match would prove nothing about the source.");
+        }
+        core_::VerificationState::Verified => {
+            let attester = e.verification.attester;
+            if e.verification.is_self_attested(&e.author) {
+                println!("  verification verified — BY ITS OWN AUTHOR");
+                println!("               The only party vouching for this build is the party");
+                println!("               that shipped it. Useful, and not an independent check.");
+            } else {
+                println!("  verification verified");
+                match attester {
+                    Some(a) => println!("               attested by {}", hex(&a)),
+                    // Unreachable through this crate's own API, which always
+                    // writes the attester alongside the state. Printed rather
+                    // than asserted because the data may come from a chain
+                    // account written by some other implementation.
+                    None => println!("               attested by nobody — treat as unverified"),
+                }
+            }
+        }
+    }
+    if let Some(c) = &e.verification.claim {
+        println!("  repository   {}", c.repository);
+        println!("  toolchain    {}", c.build.toolchain);
+        println!("  offline      {}", c.build.network_disabled);
+    }
+    ExitCode::SUCCESS
+}
+
+fn parse_hex_blob(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim_start_matches("0x");
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }

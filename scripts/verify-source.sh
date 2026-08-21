@@ -37,7 +37,7 @@ say "toolchain" "$(grep -m1 'channel' rust-toolchain.toml 2>/dev/null | grep -o 
 # applies; the registry digest needs a network round trip and is reported only
 # when one is available.
 say "builder image" "$BUILDER_IMAGE"
-IMG=$(docker buildx imagetools inspect "$BUILDER_IMAGE" --format '{{.Manifest.Digest}}' 2>/dev/null)
+IMG=$(docker buildx imagetools inspect "$BUILDER_IMAGE" 2>/dev/null | awk '/^Digest:/{print $2; exit}')
 say "builder digest" "${IMG:-unavailable offline — the tag above is the pin}"
 
 if [ "${1:-}" = "--rebuild" ]; then

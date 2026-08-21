@@ -107,9 +107,22 @@ it?
 That is not an accusation. An author who rebuilds their own release reproducibly
 has done something useful; it is simply weaker evidence than an independent
 rebuild, and rendering both as one tick would hide the difference that matters
-most. A failed attempt is recorded too: a rebuild claiming a networked build
-lands on `Unreproducible` *and* keeps the attester, so a stalled claim and a
-tried-and-failed one are distinguishable.
+most.
+
+A failed attempt is recorded too, and getting that right required being caught
+first. The instruction originally wrote `Unreproducible` and *then* returned an
+error, which reads correctly and does not work: an erroring instruction aborts
+its transaction, so the post-state never lands. Running it against the live
+testnet and reading the account back showed the entry still `Claimed` with no
+attester — the recorded refusal existed only in the source. The write and the
+error were mutually exclusive all along.
+
+So the outcomes are now split by whether there is anything to record. A networked
+build is an outcome: `Unreproducible`, attester named, committed by returning
+`Ok`, and pointedly not counted in `total_verified`. A mismatch or a missing
+claim changes no state, so it stays an error. Nobody can grief an entry through
+the first path, because the verdict is a function of the claim the author wrote —
+anyone reading it can already see the build was networked.
 
 What the chain does enforce is the one condition that makes a matching rebuild
 mean anything: the claimed environment must have had the network disabled. That
