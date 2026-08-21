@@ -142,6 +142,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "explain-entry" => explain_entry(&args),
+        "lookup" => lookup_cmd(&args),
+        "search" => search_cmd(&args),
         "idl" => idl_cmd(&args),
         "verify" => verify(&args),
         _ => usage(),
@@ -433,4 +435,114 @@ fn serde_json_parses(bytes: &[u8]) -> bool {
 
 fn hex_n(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// The registry this CLI talks to unless told otherwise.
+const DEFAULT_REGISTRY: &str = "17c7ec55940d057d2ad1a95b0ede97d29ede1d310dcd35de9e09df2e214c0c30";
+const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
+
+fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a String> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+}
+
+fn client(args: &[String]) -> Option<lez_registry_sdk::Client> {
+    let reg = flag(args, "--registry")
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_REGISTRY);
+    let Some(reg) = from_hex(reg) else {
+        eprintln!("--registry takes 64 hex characters");
+        return None;
+    };
+    let endpoint = flag(args, "--endpoint")
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_ENDPOINT);
+    Some(lez_registry_sdk::Client::new(endpoint, reg))
+}
+
+fn state_line(e: &core_::Entry) -> String {
+    match e.verification.state {
+        core_::VerificationState::Verified if e.verification.is_self_attested(&e.author) => {
+            "verified (by its own author)".into()
+        }
+        core_::VerificationState::Verified => "verified".into(),
+        core_::VerificationState::Mismatched => "MISMATCHED".into(),
+        core_::VerificationState::Unreproducible => "unreproducible".into(),
+        core_::VerificationState::Claimed => "claimed".into(),
+        core_::VerificationState::Unclaimed => "unclaimed".into(),
+    }
+}
+
+fn lookup_cmd(args: &[String]) -> ExitCode {
+    let Some(pid) = args.get(1).and_then(|s| from_hex(s)) else {
+        eprintln!("lookup <PROGRAM_ID_HEX>");
+        return ExitCode::FAILURE;
+    };
+    let Some(c) = client(args) else {
+        return ExitCode::FAILURE;
+    };
+    let addr = lez_registry_sdk::entry_address(c.registry(), &pid);
+    println!("derived  {}", lez_registry_sdk::base58(&addr));
+    match c.entry(&pid) {
+        Ok(Some(e)) => {
+            println!("{} {}", e.name, e.version);
+            println!("  {}", state_line(&e));
+            if let Some(cl) = &e.verification.claim {
+                println!("  source {}", cl.repository);
+                println!("  offline build {}", cl.build.network_disabled);
+            }
+            println!("  registered block {}", e.registered_at.block);
+            ExitCode::SUCCESS
+        }
+        // Not an error: a derived address always exists as an address. What
+        // separates a registered program from an unregistered one is whether
+        // anything was ever written there.
+        Ok(None) => {
+            println!("nothing is registered at that address");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn search_cmd(args: &[String]) -> ExitCode {
+    let needle = args.get(1).cloned().unwrap_or_default().to_lowercase();
+    let Some(c) = client(args) else {
+        return ExitCode::FAILURE;
+    };
+    let entries = match c.walk() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("failed: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let hits: Vec<_> = entries
+        .iter()
+        .filter(|e| {
+            needle.is_empty()
+                || e.name.to_lowercase().contains(&needle)
+                || e.version.to_lowercase().contains(&needle)
+                || e.description.to_lowercase().contains(&needle)
+                || e.tags.iter().any(|t| t.to_lowercase().contains(&needle))
+                || lez_registry_sdk::base58(&e.author)
+                    .to_lowercase()
+                    .contains(&needle)
+                || state_line(e).to_lowercase().contains(&needle)
+        })
+        .collect();
+    println!("{} of {} entries", hits.len(), entries.len());
+    for e in hits {
+        println!(
+            "  {:<34} {:<10} {}",
+            e.name.chars().take(34).collect::<String>(),
+            e.version.chars().take(10).collect::<String>(),
+            state_line(e)
+        );
+    }
+    ExitCode::SUCCESS
 }

@@ -30,7 +30,7 @@ than described as nearly done.
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 13 | SDK for third parties: register, resolve, search | **partial** | `sdk/` resolves and enumerates; it does not yet build register/update transactions |
-| 14 | CLI covering register, update, lookup, search, verification | **partial** | `cli/` does lookup, address derivation, digest and verification; register and update currently go through `spel` |
+| 14 | CLI covering register, update, lookup, search, verification | **partial** | `lookup`, `search`, `entry-address`, `deployment-digest`, `verify`, `explain-entry` and `idl` all run against the live chain; **register and update still go through `spel`** and building those transactions in-process is not done |
 | 15 | Basecamp GUI: browse, search, full metadata, resolved IDL, verification status, register | **partial** | `app/` looks up an entry and renders verification honestly; browse, search, IDL rendering and registration are not built |
 | 16 | Module published to a catalog fork of `logos-modules-release-base`, `logos-repo.json` URL in the submission | **open** | not started |
 | 17 | All four states visually distinct; canonical vs third-party distinct; the signer behind a claim surfaced, not a bare badge | **partial** | states and the attester are surfaced; the canonical/third-party badge is not yet in the UI |
