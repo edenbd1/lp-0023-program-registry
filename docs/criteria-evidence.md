@@ -61,7 +61,7 @@ than described as nearly done.
 | 27 | Builds and runs end-to-end on macOS (Apple Silicon) **and** Linux (x86_64), demo unmodified from a clean clone | **partial** | `scripts/demo.sh` is written portably and has been run on macOS only |
 | 28 | Basecamp module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/CMakeLists.txt` takes that path when `LOGOS_MODULE_BUILDER_ROOT` is set; the shipped `.lgx` was packaged with `lgx` from `logos-package` |
 | 29 | IDL generated via SPEL; **the registry registered in itself** | **met** | `idl/`, and entry 0 is the registry |
-| 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **open** | CI runs unit tests, lints and a `no_std` build; nothing talks to a sequencer |
+| 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **met** | `sdk/tests/e2e.rs` reads the live registry and asserts on what comes back: the registry is registered in itself, the derivation still agrees with the runtime, the counters match what the walk finds, all four verification states are present on chain, and an unregistered program resolves to nothing rather than erroring. Run as a required CI job, not skipped |
 | 31 | README documents setup, program ID, CLI and Basecamp usage step by step | **partial** | README covers design and layout; step-by-step usage is thin |
 | 32 | SDK docs with a worked resolve example | **open** | crate docs exist; no worked example |
 | 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **partial** | `demo.sh` runs read-only against the public testnet |

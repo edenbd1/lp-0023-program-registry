@@ -13,7 +13,9 @@
 //! index can be re-derived here and checked against the chain.
 
 use lez_registry_core as core_;
-pub use lez_registry_core::{AccountId, Entry, GlobalState, ProgramId, VerificationState};
+pub use lez_registry_core::{
+    AccountId, Entry, GlobalState, ProgramId, Publisher, VerificationState,
+};
 use sha2::{Digest, Sha256};
 
 /// Domain separator LEZ hashes into every program-derived address.

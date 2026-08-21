@@ -68,3 +68,24 @@ jobs:
           for s in scripts/*.sh scripts/sealed/docker; do
             bash -n "$s" || exit 1
           done
+
+  # A separate job so a sequencer outage reads as "the network was down" rather
+  # than as "the code is broken". It is required rather than optional: a skipped
+  # integration test is an integration test that did not run, and reporting
+  # green for it would be reporting something untrue.
+  e2e:
+    name: End to end against a real sequencer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      # --ignored, not --include-ignored: these are the only tests this job
+      # exists to run, and a pass that came from the unit tests would hide a
+      # sequencer that answered nothing.
+      - name: Read the live registry
+        run: cargo test --release --manifest-path sdk/Cargo.toml -- --ignored --nocapture
+
+      - name: Re-check every claim in DEPLOYMENTS.md
+        run: ./scripts/verify-onchain.sh
