@@ -31,6 +31,12 @@ echo "[1/2] fetching dependencies (network), checked against Cargo.lock ..."
 # .cargo/config.toml would have cargo reading a half-written config of its own
 # while it vendors.
 STANZA=$(mktemp)
+# Clear the vendor directory first. Re-vendoring over an existing one leaves the
+# previous version's files behind, and cargo then refuses the build with
+# "the listed checksum of .../.cargo_vcs_info.json has changed" -- which is the
+# good outcome. The bad one is a stale crate that still checksums cleanly and
+# silently ships a version the lockfile no longer names.
+rm -rf "$VENDOR"
 cargo vendor --manifest-path program/Cargo.toml "$VENDOR" > "$STANZA"
 sed -i.bak "s|directory = \".*\"|directory = \"$VENDOR\"|" "$STANZA" && rm -f "$STANZA.bak"
 mkdir -p .cargo
@@ -41,7 +47,7 @@ echo "[2/2] building with --network none ..."
 OUT=$(PATH="$PWD/scripts/sealed:$PATH" cargo risczero build --manifest-path program/Cargo.toml 2>&1)
 echo "$OUT" | tail -2
 
-IMAGE_ID=$(printf '%s' "$OUT" | grep -o 'ImageID: [0-9a-f]\{64\}' | tail -1 | cut -d' ' -f2)
+IMAGE_ID=$(printf '%s' "$OUT" | grep -o 'ImageID: [0-9a-f]\{64\}' | tail -1 | cut -d' ' -f2) || true
 if [ -z "$IMAGE_ID" ]; then
   echo "sealed build failed -- no ImageID produced" >&2
   exit 1
