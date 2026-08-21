@@ -35,7 +35,7 @@ fn stats(v: &[u64]) -> (u64, u64, u64) {
 
 fn sample_claim() -> SourceClaim {
     SourceClaim {
-        repository: "https://github.com/edenbd1/lez-program-registry".into(),
+        repository: "https://github.com/edenbd1/lp-0023-program-registry".into(),
         commit: [0x8d; 20],
         source_digest: [0xae; 32],
         build: BuildEnvironment {
