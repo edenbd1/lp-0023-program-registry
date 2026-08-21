@@ -57,6 +57,18 @@ regardless of who won the race.
 
 Authorship here is therefore **demonstrated capability, not identity**, and
 `is_self_attested` is what tells a reader which of the two they are looking at.
+
+One consequence worth naming, because it looks like a bug and is not: a takeover
+always produces a **self-attested** entry. The challenger becomes both the author
+and the attester in the same instruction, so by definition the only party
+vouching for the build is the party holding the entry. An independently verified
+entry needs someone *else* to run `record_rebuild` afterwards — which anyone can,
+and which is exactly the signal a reader should want.
+
+Demonstrated on chain at block 17862: one account registered the canonical entry
+and claimed the real source; a challenger submitting a rebuild that did not
+reproduce the bytecode was refused and the entry did not move; the same
+challenger submitting the correct rebuild took the entry and it became verified.
 Identity would need something this chain does not have: a deploy authority, or an
 off-chain attestation the registry would then have to trust.
 
