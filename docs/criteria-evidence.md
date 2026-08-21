@@ -63,7 +63,7 @@ than described as nearly done.
 | 29 | IDL generated via SPEL; **the registry registered in itself** | **met** | `idl/`, and entry 0 is the registry |
 | 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **met** | `sdk/tests/e2e.rs` reads the live registry and asserts on what comes back: the registry is registered in itself, the derivation still agrees with the runtime, the counters match what the walk finds, all four verification states are present on chain, and an unregistered program resolves to nothing rather than erroring. Run as a required CI job, not skipped |
 | 31 | README documents setup, program ID, CLI and Basecamp usage step by step | **partial** | README covers design and layout; step-by-step usage is thin |
-| 32 | SDK docs with a worked resolve example | **open** | crate docs exist; no worked example |
+| 32 | SDK documentation with a worked resolve example | **met** | `sdk/examples/resolve.rs` — the path a wallet or explorer takes, in about twenty lines: derive the address, read the entry, and branch on the verification state including the self-attested case. Runs against the live chain |
 | 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **partial** | `demo.sh` runs read-only against the public testnet |
 
 ## Adoption

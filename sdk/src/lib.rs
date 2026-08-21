@@ -251,22 +251,30 @@ mod tests {
     /// if the derivation drifts from the runtime's — which is the only way to
     /// notice, since a wrong derivation still returns a perfectly well-formed
     /// address that simply has nothing at it.
-    const REGISTRY: ProgramId = [
-        0x14, 0x5c, 0x11, 0x1d, 0x0e, 0x81, 0x95, 0xf8, 0x34, 0x83, 0xc1, 0x01, 0x30, 0x22, 0x13,
-        0x97, 0xfc, 0x11, 0xef, 0x62, 0x9e, 0xfc, 0x89, 0xdb, 0xb4, 0x14, 0xbc, 0xc9, 0xee, 0x3c,
-        0xc8, 0xfd,
-    ];
+    /// The registry deployed at block 17862. One place, in hex, because the
+    /// addresses below are *derived* from it — writing both the id and the
+    /// addresses by hand meant they could disagree, and three times in one day
+    /// they did after a redeploy.
+    const REGISTRY_HEX: &str = "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396";
+
+    fn registry() -> ProgramId {
+        let mut out = [0u8; 32];
+        for (i, b) in out.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&REGISTRY_HEX[i * 2..i * 2 + 2], 16).expect("valid hex");
+        }
+        out
+    }
 
     #[test]
     fn the_derivation_reproduces_a_live_testnet_address() {
         assert_eq!(
-            base58(&entry_address(&REGISTRY, &REGISTRY)),
-            "84NG6dyqNiARW9K1LvK1cE9CZWYNWj9H179yWLNihB1q",
+            base58(&entry_address(&registry(), &registry())),
+            "ECfj83o2bMh48F318oStb5qvA9ep7BfRd2v59V4AyQqg",
             "canonical entry of the registry's own program"
         );
         assert_eq!(
-            base58(&global_address(&REGISTRY)),
-            "CLAEqmgWsrYPPwja3Bwvc5pgN64yBKtwKv8b2KGQRgoF",
+            base58(&global_address(&registry())),
+            "5sKC3dtdTfSCGc715gFyb41anbn1iLtg6U47WQWnYE4X",
             "the singleton global account"
         );
     }
@@ -287,8 +295,8 @@ mod tests {
     fn a_third_party_entry_never_collides_with_the_canonical_one() {
         let publisher = [7u8; 32];
         assert_ne!(
-            entry_address(&REGISTRY, &REGISTRY),
-            third_party_entry_address(&REGISTRY, &REGISTRY, &publisher),
+            entry_address(&registry(), &registry()),
+            third_party_entry_address(&registry(), &registry(), &publisher),
             "a stranger must not be able to occupy the canonical address"
         );
     }
@@ -299,8 +307,8 @@ mod tests {
         // deployment cannot answer for the first.
         let other = [9u8; 32];
         assert_ne!(
-            entry_address(&REGISTRY, &REGISTRY),
-            entry_address(&other, &REGISTRY)
+            entry_address(&registry(), &registry()),
+            entry_address(&other, &registry())
         );
     }
 }

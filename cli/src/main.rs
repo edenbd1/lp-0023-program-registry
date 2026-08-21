@@ -438,7 +438,7 @@ fn hex_n(b: &[u8]) -> String {
 }
 
 /// The registry this CLI talks to unless told otherwise.
-const DEFAULT_REGISTRY: &str = "17c7ec55940d057d2ad1a95b0ede97d29ede1d310dcd35de9e09df2e214c0c30";
+const DEFAULT_REGISTRY: &str = "c59dd9c30e93fd2ec6c89f4d3da94bf1084f822a1f1afb4703253ddd92101396";
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a String> {
