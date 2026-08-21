@@ -242,7 +242,7 @@ fn entries_refuse_the_shapes_that_would_not_fit_their_account() {
         Publisher::Canonical,
     )
     .unwrap();
-    e.tags = (0..MAX_TAGS + 1).map(|i| alloc_tag(i)).collect();
+    e.tags = (0..MAX_TAGS + 1).map(alloc_tag).collect();
     assert_eq!(e.validate().unwrap_err(), RegistryError::TooLong);
     e.tags = vec!["".into()];
     assert_eq!(e.validate().unwrap_err(), RegistryError::TooLong);

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: Core types, verification logic and lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy, warnings are errors
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Release, not debug: the release profile sets overflow-checks = true, so
+      # a missed checked_* panics here rather than wrapping on chain. Testing in
+      # debug would exercise different arithmetic from the one that ships.
+      - name: Tests
+        run: cargo test --release --verbose
+
+      # The core links into a RISC-V guest, which has no std. Building for a
+      # no_std target is the only way to find out that something pulled it in —
+      # `cargo test` runs on the host and would never notice.
+      - name: The core still builds without std
+        run: |
+          rustup target add thumbv7em-none-eabi
+          cargo build --release --target thumbv7em-none-eabi
