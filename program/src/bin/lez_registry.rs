@@ -341,9 +341,14 @@ mod lez_registry {
         store_entry(&mut entry.account, &e)?;
 
         if networked {
-            // Deliberately not counted: Unreproducible is not a verification,
-            // and total_verified must never move for one.
-            return Ok(SpelOutput::execute(vec![entry, attester], vec![]));
+            // `global` is returned unmodified rather than dropped. The post-state
+            // must carry every account the instruction declares -- omitting one
+            // is refused by the runtime with the same silent message as every
+            // other failure, which cost a deploy cycle to find.
+            //
+            // Its counter deliberately does not move: Unreproducible is not a
+            // verification, and total_verified must never grow for one.
+            return Ok(SpelOutput::execute(vec![entry, global, attester], vec![]));
         }
 
         // Only the transition counts. Re-attesting an already-verified entry adds
