@@ -9,10 +9,10 @@ Built **sealed** — every build container had its network disabled.
 | | |
 |---|---|
 | ProgramId (RISC0 ImageID) | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
-| deployment digest | `2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94` |
-| deploy transaction | [`2ff83da8…be7ebb94`](https://explorer.testnet.lez.logos.co/transaction/2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94) · block 17589 |
-| global state | `42MaszdnoXcWkDZBgNJZVyP26TtD47sBxNLkXnmmr5Dj` |
-| canonical entry (itself) | `2YpaP2aWgAqx9uVHQ4yoAsp7jtt672SR4qyTJrGdq3gR` |
+| deployment digest | `b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953` |
+| deploy transaction | [`b31782fc…6bfb2953`](https://explorer.testnet.lez.logos.co/transaction/b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953) · block 17910 |
+| global state | `75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z` |
+| canonical entry (itself) | `wkLxSjsYNRq24FKPzDSh1haT382zwMU5QFb2YuHRD4h` |
 
 ### All five verification states, live, and each one true
 

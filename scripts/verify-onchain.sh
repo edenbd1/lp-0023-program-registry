@@ -9,6 +9,8 @@
 # if a control unexpectedly resolves, or if the locally computed deployment
 # digest disagrees with the deploy transaction hash.
 set -uo pipefail
+# A command that does not exist must not read as a check that passed.
+trap 'fail=1' ERR
 RPC="${SEQUENCER_URL:-https://testnet.lez.logos.co}"
 fail=0
 
@@ -60,20 +62,20 @@ b=open(sys.argv[1],'rb').read()
 print(hashlib.sha256(struct.pack('<I',len(b))+b).hexdigest())
 PY
 )
-  if [ "$got" = 2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94 ]; then
-    printf '  OK   %-22s recomputes to the deploy transaction hash\n' "digest"
+  # Asked of the chain rather than compared against a literal, which goes stale
+  # on every redeploy and then quietly checks nothing.
+  if [ "$(printf '%s' "$(fetch "$got")" | python3 -c 'import sys,json;print("yes" if json.load(sys.stdin).get("result") else "no")' 2>/dev/null)" = yes ]; then
+    printf '  OK   %-22s %s is a transaction on this chain
+' "digest" "${got:0:12}..."
   else
-    printf '  FAIL %-22s got %s\n' "digest" "$got"
+    printf '  FAIL %-22s %s is not a transaction on this chain
+' "digest" "$got"
     fail=1
   fi
 else
   printf '  SKIP %-22s %s not present\n' "digest" "$BIN"
 fi
 
-# Account addresses, checked by reading them rather than by trusting this file.
-# An address quoted in documentation and never fetched is an address that can be
-# wrong for as long as nobody looks -- which is how a fabricated global-state
-# address survived one commit here.
 account() { # label base58 min_bytes
   local n
   n=$(curl -s -m 25 -X POST "$RPC" -H 'Content-Type: application/json' \
@@ -86,8 +88,20 @@ account() { # label base58 min_bytes
     fail=1
   fi
 }
-account global-state    42MaszdnoXcWkDZBgNJZVyP26TtD47sBxNLkXnmmr5Dj 16
-account canonical-entry 2YpaP2aWgAqx9uVHQ4yoAsp7jtt672SR4qyTJrGdq3gR 100
+
+# Account addresses, DERIVED from the deployed artifact rather than written down.
+# Hardcoding them looked safe and was not: accounts of earlier deployments still
+# exist on chain, so a stale address passes this check while verifying a program
+# nobody uses. A check that passes on the wrong target is worse than one that
+# fails.
+PROGRAM=$(spel program-id "$BIN" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
+if [ -n "$PROGRAM" ]; then
+  account global-state    "$(python3 scripts/derive.py "$PROGRAM" global)" 16
+  account canonical-entry "$(python3 scripts/derive.py "$PROGRAM" entry)"  100
+else
+  printf '  FAIL %-22s could not read an ImageID from %s\n' "accounts" "$BIN"
+  fail=1
+fi
 
 # Controls. Neither hash was ever deployed, so both must return null; if the
 # endpoint answers "yes" to these it is answering "yes" to anything.
