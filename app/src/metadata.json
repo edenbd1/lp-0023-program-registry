@@ -1,0 +1,22 @@
+{
+  "name": "lez_program_registry",
+  "version": "0.1.0",
+  "description": "LEZ program registry — look up a program's provenance by deriving its entry address locally and reading it from a sequencer, with no index in the path",
+  "author": "edenbd1",
+  "type": "ui",
+  "main": "lez_program_registry",
+  "dependencies": [],
+  "category": "developer-tools",
+  "build": {
+    "type": "cmake",
+    "files": [
+      "src/plugin.cpp",
+      "src/plugin.h",
+      "src/registry_bridge.cpp",
+      "src/registry_bridge.h",
+      "qml/Main.qml",
+      "qml/qmldir",
+      "src/metadata.json"
+    ]
+  }
+}
