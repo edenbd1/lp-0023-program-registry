@@ -138,6 +138,7 @@ const char* stateWord(quint8 tag) {
         case 1:  return "claimed";
         case 2:  return "verified";
         case 3:  return "unreproducible";
+        case 4:  return "mismatched";
         default: return "unknown";
     }
 }
@@ -241,6 +242,11 @@ void RegistryBridge::lookup(const QString& programIdHex) {
 
         Reader r{payload};
         r.skip(32);  // program_id, already known
+        // registered_at: Stamp { block: u64, millis: u64 }, read from the
+        // sequencer's clock at registration rather than supplied by the
+        // registrant.
+        const quint64 regBlock  = r.u64();
+        const quint64 regMillis = r.u64();
         const QString name    = r.str();
         const QString version = r.str();
         const QString author  = base58(r.bytes(32));
@@ -263,6 +269,13 @@ void RegistryBridge::lookup(const QString& programIdHex) {
             toolchain = r.str();
             offline   = r.u8() == 1;
         }
+        // last_checked: Option<Stamp>. A verdict with no date cannot be judged
+        // for staleness, so the panel is given one.
+        quint64 checkedBlock = 0;
+        if (r.u8() == 1) {
+            checkedBlock = r.u64();
+            (void)r.u64();  // millis, not displayed
+        }
         QString attester;
         if (r.u8() == 1) attester = base58(r.bytes(32));
         const bool frozen = r.u8() == 1;
@@ -279,6 +292,8 @@ void RegistryBridge::lookup(const QString& programIdHex) {
                         pubTag == 0 ? QStringLiteral("canonical")
                                     : QStringLiteral("third party"),
                         QString::fromLatin1(stateWord(stateTag)), selfAttested,
-                        frozen, repository, toolchain, offline, attester, addr);
+                        frozen, repository, toolchain, offline, attester, addr,
+                        QString::number(regBlock), QString::number(regMillis),
+                        QString::number(checkedBlock));
     });
 }

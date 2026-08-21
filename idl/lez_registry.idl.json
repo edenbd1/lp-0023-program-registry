@@ -68,6 +68,12 @@
           }
         },
         {
+          "name": "clock",
+          "writable": false,
+          "signer": false,
+          "init": false
+        },
+        {
           "name": "author",
           "writable": false,
           "signer": true,
@@ -278,6 +284,12 @@
               }
             ]
           }
+        },
+        {
+          "name": "clock",
+          "writable": false,
+          "signer": false,
+          "init": false
         },
         {
           "name": "attester",

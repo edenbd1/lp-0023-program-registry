@@ -48,6 +48,23 @@ pub type ProgramId = [u8; 32];
 /// A 32-byte account identifier.
 pub type AccountId = [u8; 32];
 
+/// A point in chain time: the block, and the millisecond timestamp the sequencer
+/// wrote for it.
+///
+/// **Never supplied by a caller.** A zkVM guest has no clock, which invites the
+/// shortcut of letting the client pass a number — and a client-supplied
+/// timestamp is a client-supplied lie waiting to happen, in a registry whose
+/// adoption is measured by when things were registered. LEZ maintains clock
+/// accounts at fixed addresses (`/LEZ/ClockProgramAccount/00000{01,10,50}`)
+/// written by the sequencer; the program reads one of those as an input account
+/// and checks its owner before believing a byte of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct Stamp {
+    pub block: u64,
+    /// Milliseconds since the Unix epoch, as the sequencer records it.
+    pub millis: u64,
+}
+
 /// A Logos Storage content identifier. The registry stores only this on chain;
 /// the IDL JSON itself lives in Storage, because an IDL is kilobytes and an
 /// on-chain kilobyte is paid for by everyone who syncs the zone.
@@ -67,6 +84,9 @@ pub enum RegistryError {
     Immutable,
     /// A source claim was offered for bytecode that is not what is deployed.
     ArtifactMismatch,
+    /// A mismatch verdict was submitted against an entry that is already
+    /// verified. Refused: see `record_rebuild`.
+    AlreadyVerified,
     /// The rebuild ran with network access, so a hash match proves nothing.
     NetworkedBuild,
 }
@@ -177,6 +197,13 @@ pub enum VerificationState {
     /// The rebuild happened but cannot count — it ran with the network up, so
     /// the build could have fetched the artifact it was meant to reproduce.
     Unreproducible,
+    /// A claim was rebuilt and the bytecode did **not** match.
+    ///
+    /// This is not `Unclaimed` with extra steps, and collapsing the two would be
+    /// the single most misleading thing this type could do. "Nobody has said
+    /// where the source is" and "somebody said, and it does not reproduce" are
+    /// opposite signals: the first is a gap, the second is evidence against.
+    Mismatched,
 }
 
 /// The verification attached to an entry, kept as its own type so a state and
@@ -186,6 +213,13 @@ pub struct Verification {
     pub state: VerificationState,
     /// The claim this verification concerns, if any.
     pub claim: Option<SourceClaim>,
+    /// Block and timestamp of the last rebuild recorded against this entry,
+    /// whatever its outcome.
+    ///
+    /// Read from the sequencer's clock account, not from the caller. Exposed so
+    /// a client can judge staleness itself rather than being told a verdict with
+    /// no date on it.
+    pub last_checked: Option<Stamp>,
     /// Who attested to the rebuild.
     ///
     /// A chain cannot compile anything, so this registry cannot verify a build;
@@ -200,6 +234,7 @@ impl Verification {
         Self {
             state: VerificationState::Unclaimed,
             claim: None,
+            last_checked: None,
             attester: None,
         }
     }
@@ -212,6 +247,7 @@ impl Verification {
         Ok(Self {
             state: VerificationState::Claimed,
             claim: Some(source),
+            last_checked: None,
             attester: None,
         })
     }
@@ -229,12 +265,39 @@ impl Verification {
         rebuilt: ProgramId,
         subject: ProgramId,
         attester: AccountId,
+        at: Stamp,
     ) -> Result<()> {
         let claim = match &self.claim {
             Some(c) => c,
             None => return Err(RegistryError::Empty),
         };
+        // A contradicting *assertion* must not erase a demonstrated *fact*.
+        //
+        // `rebuilt` is whatever the caller says their rebuild produced, and the
+        // chain cannot check it. If a mismatch verdict could overwrite Verified,
+        // any account could un-verify any entry for the cost of one transaction,
+        // by typing the wrong 32 bytes. So a verified entry keeps its state and
+        // the caller is told why.
+        //
+        // Invalidation still exists and is the author's to trigger: changing the
+        // source claim resets the entry to Claimed. That is the version binding
+        // the design needs, and it belongs to whoever the claim is about rather
+        // than to any passer-by.
+        if rebuilt != subject && matches!(self.state, VerificationState::Verified) {
+            return Err(RegistryError::AlreadyVerified);
+        }
+
+        // Every outcome below is dated and attributed, including the failures.
+        // An undated verdict cannot be judged for staleness, and an unattributed
+        // one cannot be judged at all.
+        self.last_checked = Some(at);
+        self.attester = Some(attester);
         if rebuilt != subject {
+            // Recorded, not refused. "Somebody published a source that does not
+            // reproduce" is a stronger negative signal than "nobody published
+            // one", and a registry that returned an error here would leave the
+            // entry looking merely unverified.
+            self.state = VerificationState::Mismatched;
             return Err(RegistryError::ArtifactMismatch);
         }
         if !claim.build.network_disabled {
@@ -243,11 +306,9 @@ impl Verification {
             // leave a mark, or the next caller reads `Claimed` and cannot tell
             // this was already attempted.
             self.state = VerificationState::Unreproducible;
-            self.attester = Some(attester);
             return Err(RegistryError::NetworkedBuild);
         }
         self.state = VerificationState::Verified;
-        self.attester = Some(attester);
         Ok(())
     }
 
@@ -277,6 +338,12 @@ impl Verification {
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Entry {
     pub program_id: ProgramId,
+    /// When this entry was registered, read from the sequencer's clock.
+    ///
+    /// The adoption story a registry tells — how many programs, registered over
+    /// how long — is only as good as this field, so it is not a number the
+    /// registering client gets to choose.
+    pub registered_at: Stamp,
     pub name: String,
     pub version: String,
     pub author: AccountId,
@@ -294,6 +361,7 @@ pub struct Entry {
 impl Entry {
     pub fn new(
         program_id: ProgramId,
+        registered_at: Stamp,
         name: String,
         version: String,
         author: AccountId,
@@ -301,6 +369,7 @@ impl Entry {
     ) -> Result<Self> {
         let e = Self {
             program_id,
+            registered_at,
             name,
             version,
             author,

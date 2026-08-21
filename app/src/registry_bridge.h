@@ -52,7 +52,9 @@ signals:
                     const QString& publisher, const QString& verification,
                     bool selfAttested, bool frozen, const QString& repository,
                     const QString& toolchain, bool offlineBuild,
-                    const QString& attester, const QString& account);
+                    const QString& attester, const QString& account,
+                    const QString& registeredBlock, const QString& registeredMillis,
+                    const QString& lastCheckedBlock);
     void entryMissing(const QString& account);
     void countersUpdated(const QString& total, const QString& verified);
     void failed(const QString& what);

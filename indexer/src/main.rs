@@ -55,6 +55,7 @@ const fn state_word(s: &VerificationState) -> &'static str {
         VerificationState::Unclaimed => "unclaimed",
         VerificationState::Claimed => "claimed",
         VerificationState::Verified => "verified",
+        VerificationState::Mismatched => "mismatched",
         VerificationState::Unreproducible => "unreproducible",
     }
 }
@@ -85,7 +86,7 @@ fn entry_json(e: &Entry, idx: &Index) -> String {
     // service: where the entry lives, and that the address is derived rather
     // than looked up.
     format!(
-        r#"{{"name":"{}","version":"{}","description":"{}","program_id":"{}","author":"{}","verification":"{}","self_attested":{},"frozen":{},"entry_account":"{}","source":"derive pda(registry, sha256(\"lez-registry:entry:v1\" || program_id)) and read it; this index is not required"}}"#,
+        r#"{{"name":"{}","version":"{}","description":"{}","program_id":"{}","author":"{}","verification":"{}","self_attested":{},"frozen":{},"registered_block":{},"last_checked_block":{},"entry_account":"{}","source":"derive pda(registry, sha256(\"lez-registry:entry:v1\" || program_id)) and read it; this index is not required"}}"#,
         escape(&e.name),
         escape(&e.version),
         escape(&e.description),
@@ -94,6 +95,8 @@ fn entry_json(e: &Entry, idx: &Index) -> String {
         state_word(&e.verification.state),
         e.verification.is_self_attested(&e.author),
         e.frozen,
+        e.registered_at.block,
+        e.verification.last_checked.map_or(0, |s| s.block),
         addr,
     )
 }

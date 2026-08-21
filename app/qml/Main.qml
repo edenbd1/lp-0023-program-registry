@@ -40,6 +40,7 @@ Item {
     // painting both green would hide the difference that matters most.
     function stateColour(state, selfAttested) {
         if (state === "verified") return selfAttested ? caution : good
+        if (state === "mismatched") return bad
         if (state === "unreproducible") return bad
         if (state === "claimed") return caution
         return muted
@@ -48,6 +49,7 @@ Item {
     function stateHeadline(state, selfAttested) {
         if (state === "verified" && selfAttested) return "Verified — by its own author"
         if (state === "verified") return "Verified — independently rebuilt"
+        if (state === "mismatched") return "Mismatched — the published source does not rebuild to this"
         if (state === "unreproducible") return "Not reproducible"
         if (state === "claimed") return "Source claimed, not verified"
         return "No source claimed"
@@ -59,6 +61,10 @@ Item {
                  + "That is useful, and it is not an independent check."
         if (state === "verified")
             return "Someone other than the author rebuilt this offline and the bytecode matched."
+        if (state === "mismatched")
+            return "Somebody published a source repository for this program and it does not "
+                 + "produce this bytecode. That is a stronger negative signal than no claim "
+                 + "at all — do not read it as merely unverified."
         if (state === "unreproducible")
             return "A rebuild was recorded, but the claimed build had network access — so a "
                  + "match would prove nothing about the source."
@@ -71,13 +77,16 @@ Item {
         target: bridge
         function onEntryFound(name, version, description, author, publisher,
                               verification, selfAttested, frozen, repository,
-                              toolchain, offlineBuild, attester, account) {
+                              toolchain, offlineBuild, attester, account,
+                              registeredBlock, registeredMillis, lastCheckedBlock) {
             root.entry = {
                 name: name, version: version, description: description,
                 author: author, publisher: publisher, verification: verification,
                 selfAttested: selfAttested, frozen: frozen, repository: repository,
                 toolchain: toolchain, offlineBuild: offlineBuild,
-                attester: attester, account: account
+                attester: attester, account: account,
+                registeredBlock: registeredBlock, registeredMillis: registeredMillis,
+                lastCheckedBlock: lastCheckedBlock
             }
             root.busy = false
             root.status = "Read from " + bridge.endpoint()
@@ -300,6 +309,18 @@ Item {
 
                     Item { Layout.fillHeight: true }
                 }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                visible: root.entry !== null
+                color: muted
+                font.pixelSize: 11
+                text: "Names, descriptions and tags are asserted by whoever registered the "
+                    + "entry. The registry does not vouch for them. And verified means only "
+                    + "that the deployed bytecode was produced from the stated source — it "
+                    + "says nothing about whether that source is safe, audited or benign."
             }
 
             Text {

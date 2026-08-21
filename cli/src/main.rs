@@ -258,6 +258,15 @@ fn explain_entry(args: &[String]) -> ExitCode {
             println!("               A source is asserted and nobody has rebuilt it. Typing a");
             println!("               URL is not evidence.");
         }
+        core_::VerificationState::Mismatched => {
+            println!("  verification MISMATCHED — a source was published and does not rebuild");
+            println!("               This is a stronger negative signal than no claim at all:");
+            println!("               somebody said where the source is, and it does not produce");
+            println!("               this bytecode. Do not read it as merely unverified.");
+            if let Some(a) = e.verification.attester {
+                println!("               found by {}", hex(&a));
+            }
+        }
         core_::VerificationState::Unreproducible => {
             println!("  verification unreproducible");
             println!("               A rebuild was recorded but the claimed build had network");
@@ -286,6 +295,16 @@ fn explain_entry(args: &[String]) -> ExitCode {
                 }
             }
         }
+    }
+    println!(
+        "  registered   block {} ({} ms)",
+        e.registered_at.block, e.registered_at.millis
+    );
+    // Printed next to the verdict so staleness is the reader's to judge rather
+    // than something this tool decides on their behalf.
+    match e.verification.last_checked {
+        Some(s) => println!("  last checked block {} ({} ms)", s.block, s.millis),
+        None => println!("  last checked never"),
     }
     if let Some(c) = &e.verification.claim {
         println!("  repository   {}", c.repository);

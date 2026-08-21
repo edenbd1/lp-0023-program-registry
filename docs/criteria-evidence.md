@@ -1,0 +1,111 @@
+# LP-0023 criteria, and where this submission actually stands
+
+The prize text is [PR #127](https://github.com/logos-co/lambda-prize/pull/127) on
+`logos-co/lambda-prize` (`prizes/LP-0023.md`, status **Draft**). It is not yet
+merged, so the criteria below are quoted from that PR and may still change.
+
+Status is one of **met**, **partial**, or **open**. Nothing is marked met that
+has not been run; where a criterion is partial, what is missing is named rather
+than described as nearly done.
+
+## Functionality
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | On-chain registry program in SPEL with a published IDL | **met** | `program/`, `idl/lez_registry.idl.json`, deployed — see [DEPLOYMENTS.md](../DEPLOYMENTS.md) |
+| 2 | Register with name, version, author, description, tags, IDL pointer, **registration timestamp**; per-program PDA derivable without an indexer | **met** | `register`; the timestamp is read from the sequencer's clock account, not supplied by the caller — see below |
+| 3 | Canonical vs third-party entries, distinguishable on chain; unauthorised canonical attempt rejected in the demo | **partial** | both derivations exist and the program re-derives the seed, but LEZ has no deploy authority to bind canonical to — the position is argued in [design-positions.md](design-positions.md) and the rejection demo is not written |
+| 4 | Only the registering author may update | **met** | `require_writable_by`, test `only_the_author_may_write_and_freezing_is_one_way` |
+| 5 | Singleton global state with total registered | **met** | `GlobalAccount { total_entries, total_verified }` |
+| 6 | IDL JSON on Logos Storage, uploaded by tooling in one step, resolvable and parse-checked by clients | **open** | the entry carries `idl: Option<ContentId>`; nothing uploads or resolves it yet |
+| 7 | Discovery: by program ID without an indexer, **full enumeration**, search by name/author/tag | **met** | derivation in `sdk/`; enumeration via the sequence directory; search in `indexer/`, which is part of this submission and runs against a stock sequencer |
+| 8 | Reproducible builds — pinned toolchain, deterministic, byte-identical for a third party | **met** | `scripts/build-sealed.sh`; repeated runs reproduce the same ImageID, and a rebuild from HEAD reproduced the deployed one |
+| 9 | Source verification reporting **four distinct states** | **met** | `Verified`, `Mismatched`, `Unclaimed`, `Claimed` — plus a fifth, `Unreproducible`, for a rebuild whose claimed build had network access |
+| 10 | A hash match alone is not proof; state how the build-script attack is addressed | **met** | sealed builds plus a named attester; [README](../README.md) |
+| 11 | Version-bound verification; document the staleness window; expose the last-verified point | **met** | `last_checked` is stored and displayed; the staleness argument is in [design-positions.md](design-positions.md) |
+| 12 | Operates end-to-end against Logos testnet 0.3 | **partial** | live on the public LEZ testnet; the "0.3" label has not been confirmed against this endpoint |
+
+## Usability
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 13 | SDK for third parties: register, resolve, search | **partial** | `sdk/` resolves and enumerates; it does not yet build register/update transactions |
+| 14 | CLI covering register, update, lookup, search, verification | **partial** | `cli/` does lookup, address derivation, digest and verification; register and update currently go through `spel` |
+| 15 | Basecamp GUI: browse, search, full metadata, resolved IDL, verification status, register | **partial** | `app/` looks up an entry and renders verification honestly; browse, search, IDL rendering and registration are not built |
+| 16 | Module published to a catalog fork of `logos-modules-release-base`, `logos-repo.json` URL in the submission | **open** | not started |
+| 17 | All four states visually distinct; canonical vs third-party distinct; the signer behind a claim surfaced, not a bare badge | **partial** | states and the attester are surfaced; the canonical/third-party badge is not yet in the UI |
+| 18 | "Verified does not mean safe" stated wherever status is shown | **met** | in the panel, in `explain-entry --explain`, and in the README |
+| 19 | UX polish, judged as a normal user | **partial** | one screen, coherent, but thin until browse and search land |
+
+## Reliability
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 20 | Non-author cannot update; no silent overwrite on re-register | **met** | `init` refuses an existing account and the program checks besides |
+| 21 | Graceful degradation when an IDL is unresolvable or unparseable | **open** | depends on #6 |
+| 22 | No mandatory external services | **met** | sequencer only; the indexer is optional and self-hosted |
+| 23 | Source verification runs locally, no hosted build service | **met** | `scripts/build-sealed.sh` runs on the operator's Docker |
+
+## Performance
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 24 | Document compute units for register and update | **partial** | [CYCLES.md](../CYCLES.md) measures the register body at 6,294 cycles; `update` is not separately measured |
+| 25 | Lookup latency, and search across a registry of **at least 500 entries** | **partial** | [LATENCY.md](../LATENCY.md) measures 500 live lookups; the registry holds 4 entries, and the gap is stated there rather than glossed |
+
+## Supportability
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 26 | Deployed and tested on testnet 0.3, program ID in the README | **partial** | program ID published; testnet label unconfirmed |
+| 27 | Builds and runs end-to-end on macOS (Apple Silicon) **and** Linux (x86_64), demo unmodified from a clean clone | **partial** | `scripts/demo.sh` is written portably and has been run on macOS only |
+| 28 | Basecamp module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/CMakeLists.txt` takes that path when `LOGOS_MODULE_BUILDER_ROOT` is set; the shipped `.lgx` was packaged with `lgx` from `logos-package` |
+| 29 | IDL generated via SPEL; **the registry registered in itself** | **met** | `idl/`, and entry 0 is the registry |
+| 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **open** | CI runs unit tests, lints and a `no_std` build; nothing talks to a sequencer |
+| 31 | README documents setup, program ID, CLI and Basecamp usage step by step | **partial** | README covers design and layout; step-by-step usage is thin |
+| 32 | SDK docs with a worked resolve example | **open** | crate docs exist; no worked example |
+| 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **partial** | `demo.sh` runs read-only against the public testnet |
+
+## Adoption
+
+Every item here is **open**, and none of it is a coding task.
+
+| Criterion | Note |
+|---|---|
+| 5 third-party tools integrating the SDK, independent of us | needs other people |
+| 75 stars | needs other people |
+| 100 registered programs by ≥40 distinct independent authors | needs other people |
+| 20 entries with an independently rebuildable source claim | needs other people |
+| Registrations spread over ≥2 months, ≥20 per month | needs **calendar time** — this cannot be compressed |
+| 30 Discord testimonials | needs other people |
+| 30 Twitter/X testimonials | needs other people |
+
+The two-month requirement is the binding constraint. On-chain timestamps make it
+checkable directly from chain data, which is why the registration timestamp had
+to come from the sequencer's clock rather than from whoever is registering.
+
+## The timestamp, since it is load-bearing for Adoption
+
+A zkVM guest has no clock. The obvious workaround — let the client pass a
+timestamp — would make every date in this registry a number chosen by the party
+whose adoption it evidences.
+
+LEZ maintains clock accounts at fixed addresses, written by the sequencer:
+
+```
+/LEZ/ClockProgramAccount/0000001   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU
+/LEZ/ClockProgramAccount/0000010   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWSs
+/LEZ/ClockProgramAccount/0000050   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWkX
+```
+
+Each holds `{ block_id: u64, timestamp: u64 }`. `register` and `record_rebuild`
+take one as an input account and refuse it unless it is owned by the clock
+program — pinned by ImageID
+`319fbc054d77207cbaec0b31e9cc813eca0b40d310d7112ec4a0fe64395c61fc`, checked
+against `artifacts/lez/programs/clock.bin` and against the live account's own
+`program_owner` — and unless its address is one of the three above. Both checks
+matter: the owner check stops a caller supplying an account owned by a program
+they wrote, and the address check stops them supplying some *other* account the
+clock program happens to own.
+
+So the date on an entry is the sequencer's, not the registrant's.

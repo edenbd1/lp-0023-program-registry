@@ -4,6 +4,17 @@
 
 use lez_registry_core::*;
 
+/// A point in chain time. Real ones come from the sequencer's clock account;
+/// tests supply their own because the state machine only ever stores it.
+const T0: Stamp = Stamp {
+    block: 100,
+    millis: 1_787_000_000_000,
+};
+const T1: Stamp = Stamp {
+    block: 200,
+    millis: 1_787_000_600_000,
+};
+
 /// A third party doing the rebuild. Distinct from AUTHOR so that any test which
 /// accidentally conflates the two fails rather than passes quietly.
 const ATTESTER: AccountId = [0xAA; 32];
@@ -42,7 +53,9 @@ fn a_networked_rebuild_can_never_be_verified() {
     // Offline is therefore not a nicety, it is the whole mechanism.
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(false)).unwrap();
-    let err = v.record_rebuild(artifact, artifact, ATTESTER).unwrap_err();
+    let err = v
+        .record_rebuild(artifact, artifact, ATTESTER, T0)
+        .unwrap_err();
     assert_eq!(err, RegistryError::NetworkedBuild);
     assert_eq!(v.state, VerificationState::Unreproducible);
     assert!(!v.is_verified());
@@ -52,21 +65,68 @@ fn a_networked_rebuild_can_never_be_verified() {
 fn an_offline_rebuild_that_matches_is_verified() {
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
-    v.record_rebuild(artifact, artifact, ATTESTER).unwrap();
+    v.record_rebuild(artifact, artifact, ATTESTER, T0).unwrap();
     assert_eq!(v.state, VerificationState::Verified);
     assert!(v.is_verified());
 }
 
 #[test]
-fn a_rebuild_that_does_not_match_is_refused_rather_than_recorded() {
+fn a_rebuild_that_does_not_match_is_recorded_as_mismatched_not_left_as_claimed() {
+    // Mismatched is its own state on purpose. "Nobody has said where the source
+    // is" and "somebody said, and it does not reproduce" are opposite signals,
+    // and a registry that showed the second as the first would be hiding the
+    // stronger of the two.
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
     assert_eq!(
-        v.record_rebuild([4u8; 32], artifact, ATTESTER).unwrap_err(),
+        v.record_rebuild([4u8; 32], artifact, ATTESTER, T0)
+            .unwrap_err(),
         RegistryError::ArtifactMismatch
     );
-    // And the state did not move: a failed rebuild leaves the claim a claim.
-    assert_eq!(v.state, VerificationState::Claimed);
+    assert_eq!(v.state, VerificationState::Mismatched);
+    assert_eq!(
+        v.attester,
+        Some(ATTESTER),
+        "who found it must be on the record"
+    );
+    assert_eq!(v.last_checked, Some(T0), "and when");
+    assert!(!v.is_verified());
+}
+
+#[test]
+fn a_mismatch_assertion_cannot_erase_a_demonstrated_verification() {
+    // `rebuilt` is whatever the caller says; the chain cannot check it. If a
+    // mismatch could overwrite Verified, one transaction and 32 wrong bytes
+    // would un-verify anything.
+    let subject = [1u8; 32];
+    let mut v = Verification::claim(claim_for(true)).unwrap();
+    v.record_rebuild(subject, subject, AUTHOR, T0).unwrap();
+    assert!(v.is_verified());
+
+    assert_eq!(
+        v.record_rebuild([9u8; 32], subject, ATTESTER, T1)
+            .unwrap_err(),
+        RegistryError::AlreadyVerified
+    );
+    assert!(
+        v.is_verified(),
+        "a passer-by must not undo a demonstrated fact"
+    );
+    assert_eq!(
+        v.attester,
+        Some(AUTHOR),
+        "and must not appear to have attested"
+    );
+    assert_eq!(v.last_checked, Some(T0), "nor move the clock on it");
+}
+
+#[test]
+fn a_verdict_is_always_dated_so_staleness_is_the_readers_to_judge() {
+    let subject = [1u8; 32];
+    let mut v = Verification::claim(claim_for(true)).unwrap();
+    assert_eq!(v.last_checked, None, "an unchecked claim has no date");
+    v.record_rebuild(subject, subject, ATTESTER, T1).unwrap();
+    assert_eq!(v.last_checked, Some(T1));
 }
 
 #[test]
@@ -78,15 +138,17 @@ fn a_verification_cannot_go_stale_because_the_subject_is_the_key() {
     // is to be a different entry, and a verification stays true.
     let subject = [1u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
-    v.record_rebuild(subject, subject, ATTESTER).unwrap();
+    v.record_rebuild(subject, subject, ATTESTER, T0).unwrap();
     assert!(v.is_verified());
 
     // There is no call that takes this entry to any other artifact. The nearest
-    // thing to an upgrade is a rebuild claiming different bytecode, and that is
-    // a mismatch -- refused, and it does not disturb what was already proven.
+    // thing to an upgrade is a rebuild claiming different bytecode, and once a
+    // verification exists that is refused outright -- see
+    // `a_mismatch_assertion_cannot_erase_a_demonstrated_verification`.
     assert_eq!(
-        v.record_rebuild([2u8; 32], subject, ATTESTER).unwrap_err(),
-        RegistryError::ArtifactMismatch
+        v.record_rebuild([2u8; 32], subject, ATTESTER, T1)
+            .unwrap_err(),
+        RegistryError::AlreadyVerified
     );
     assert!(
         v.is_verified(),
@@ -108,7 +170,7 @@ fn an_upgrade_is_a_different_entry_and_inherits_nothing() {
     );
 
     let mut first = Verification::claim(claim_for(true)).unwrap();
-    first.record_rebuild(v1, v1, ATTESTER).unwrap();
+    first.record_rebuild(v1, v1, ATTESTER, T0).unwrap();
     assert!(first.is_verified());
 
     let second = Verification::unclaimed();
@@ -123,7 +185,7 @@ fn an_upgrade_is_a_different_entry_and_inherits_nothing() {
 fn recording_a_rebuild_without_a_claim_is_refused() {
     let mut v = Verification::unclaimed();
     assert_eq!(
-        v.record_rebuild([1u8; 32], [1u8; 32], ATTESTER)
+        v.record_rebuild([1u8; 32], [1u8; 32], ATTESTER, T0)
             .unwrap_err(),
         RegistryError::Empty
     );
@@ -135,6 +197,7 @@ fn only_the_author_may_write_and_freezing_is_one_way() {
     let stranger = [2u8; 32];
     let mut e = Entry::new(
         [9u8; 32],
+        T0,
         "counter".into(),
         "0.1.0".into(),
         author,
@@ -210,6 +273,7 @@ fn entries_refuse_the_shapes_that_would_not_fit_their_account() {
     assert_eq!(
         Entry::new(
             [1u8; 32],
+            T0,
             "".into(),
             "1".into(),
             author,
@@ -221,6 +285,7 @@ fn entries_refuse_the_shapes_that_would_not_fit_their_account() {
     assert_eq!(
         Entry::new(
             [1u8; 32],
+            T0,
             "n".into(),
             "".into(),
             author,
@@ -231,12 +296,21 @@ fn entries_refuse_the_shapes_that_would_not_fit_their_account() {
     );
     let long = "x".repeat(MAX_NAME + 1);
     assert_eq!(
-        Entry::new([1u8; 32], long, "1".into(), author, Publisher::Canonical).unwrap_err(),
+        Entry::new(
+            [1u8; 32],
+            T0,
+            long,
+            "1".into(),
+            author,
+            Publisher::Canonical
+        )
+        .unwrap_err(),
         RegistryError::TooLong
     );
 
     let mut e = Entry::new(
         [1u8; 32],
+        T0,
         "n".into(),
         "1".into(),
         author,
@@ -276,7 +350,7 @@ fn a_verification_names_who_attested_to_it() {
     let mut v = Verification::claim(claim_for(true)).unwrap();
     assert_eq!(v.attester, None, "an unrebuilt claim vouches for nothing");
 
-    v.record_rebuild(subject, subject, ATTESTER).unwrap();
+    v.record_rebuild(subject, subject, ATTESTER, T0).unwrap();
     assert!(v.is_verified());
     assert_eq!(v.attester, Some(ATTESTER));
 }
@@ -288,7 +362,7 @@ fn a_self_attested_build_is_verified_but_flagged_as_such() {
     let subject = [1u8; 32];
 
     let mut mine = Verification::claim(claim_for(true)).unwrap();
-    mine.record_rebuild(subject, subject, AUTHOR).unwrap();
+    mine.record_rebuild(subject, subject, AUTHOR, T0).unwrap();
     assert!(mine.is_verified());
     assert!(
         mine.is_self_attested(&AUTHOR),
@@ -296,7 +370,9 @@ fn a_self_attested_build_is_verified_but_flagged_as_such() {
     );
 
     let mut theirs = Verification::claim(claim_for(true)).unwrap();
-    theirs.record_rebuild(subject, subject, ATTESTER).unwrap();
+    theirs
+        .record_rebuild(subject, subject, ATTESTER, T0)
+        .unwrap();
     assert!(theirs.is_verified());
     assert!(
         !theirs.is_self_attested(&AUTHOR),
@@ -311,7 +387,9 @@ fn a_networked_rebuild_still_records_who_ran_it() {
     // and failed, or to tell who tried.
     let subject = [1u8; 32];
     let mut v = Verification::claim(claim_for(false)).unwrap();
-    let err = v.record_rebuild(subject, subject, ATTESTER).unwrap_err();
+    let err = v
+        .record_rebuild(subject, subject, ATTESTER, T0)
+        .unwrap_err();
     assert_eq!(err, RegistryError::NetworkedBuild);
     assert_eq!(v.state, VerificationState::Unreproducible);
     assert_eq!(v.attester, Some(ATTESTER));

@@ -22,6 +22,16 @@
 // programs are good — that is a judgement, and a judgement stored on chain by
 // this program would be mistaken for a fact.
 
+// SPEL instructions take accounts and arguments as one flat parameter list, so
+// `too_many_arguments` fires on every non-trivial instruction; splitting them
+// into structs to satisfy the lint would fight the macro rather than help a
+// reader. `redundant_clone` fires inside the macro's own expansion, where there
+// is nothing here to change.
+#![allow(
+    clippy::too_many_arguments,
+    clippy::redundant_clone,
+    clippy::cloned_ref_to_slice_refs
+)]
 #![no_main]
 
 use spel_framework::prelude::*;
@@ -36,6 +46,67 @@ const E_SEED_MISMATCH: u32 = 9005;
 const E_BAD_CLAIM: u32 = 9006;
 const E_NOT_VERIFIED: u32 = 9007;
 const E_ALREADY_REGISTERED: u32 = 9008;
+const E_BAD_CLOCK: u32 = 9009;
+
+/// The LEZ clock program, pinned by ImageID.
+///
+/// A zkVM guest has no clock, and the obvious workaround — let the client pass a
+/// timestamp — makes every date in this registry a number the registering party
+/// chose. Since the adoption story a registry tells is entirely about *when*
+/// things were registered, that is not a small hole.
+///
+/// LEZ maintains clock accounts at fixed addresses, written by the sequencer.
+/// This program reads one as an input and refuses it unless the account is owned
+/// by exactly this program id — verified against
+/// `artifacts/lez/programs/clock.bin` at v0.2.4 and against the live account's
+/// own `program_owner`. Without the pin, a caller could supply an account owned
+/// by a program they wrote and choose the time after all.
+const CLOCK_PROGRAM_ID: [u32; 8] = [
+    96_247_601,
+    2_082_502_477,
+    822_865_082,
+    1_048_693_993,
+    3_544_189_898,
+    772_921_104,
+    1_694_408_900,
+    4_234_239_033,
+];
+
+/// The three addresses the clock program writes: every block, every 10, every 50.
+/// Checked as well as the owner, so a caller cannot point at some *other*
+/// account the clock program happens to own.
+const CLOCK_ACCOUNT_IDS: [&[u8; 32]; 3] = [
+    b"/LEZ/ClockProgramAccount/0000001",
+    b"/LEZ/ClockProgramAccount/0000010",
+    b"/LEZ/ClockProgramAccount/0000050",
+];
+
+/// Read chain time from a supplied clock account, or refuse.
+fn read_clock(clock: &AccountWithMetadata) -> Result<lez_registry_core::Stamp, SpelError> {
+    if clock.account.program_owner != CLOCK_PROGRAM_ID {
+        return Err(SpelError::custom(
+            E_BAD_CLOCK,
+            "clock account is not owned by the LEZ clock program",
+        ));
+    }
+    let id = clock.account_id.value();
+    if !CLOCK_ACCOUNT_IDS.contains(&id) {
+        return Err(SpelError::custom(
+            E_BAD_CLOCK,
+            "not one of the LEZ clock accounts",
+        ));
+    }
+    let d = &clock.account.data;
+    if d.len() < 16 {
+        return Err(SpelError::custom(E_BAD_CLOCK, "clock account is too short"));
+    }
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&d[0..8]);
+    let block = u64::from_le_bytes(b);
+    b.copy_from_slice(&d[8..16]);
+    let millis = u64::from_le_bytes(b);
+    Ok(lez_registry_core::Stamp { block, millis })
+}
 
 /// A registry entry, stored as the core crate defines it. The on-chain layout
 /// is `lez_registry_core::Entry` verbatim rather than a parallel struct, so a
@@ -125,6 +196,7 @@ mod lez_registry {
         #[account(init, pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
         #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
         #[account(init, pda = arg("seq_seed"))] mut directory: AccountWithMetadata,
+        clock: AccountWithMetadata,
         #[account(signer)] author: AccountWithMetadata,
         entry_seed: [u8; 32],
         seq_seed: [u8; 32],
@@ -185,8 +257,10 @@ mod lez_registry {
             ));
         }
 
-        let mut e = lez_registry_core::Entry::new(program_id, name, version, author_id, publisher)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
+        let stamp = read_clock(&clock)?;
+        let mut e =
+            lez_registry_core::Entry::new(program_id, stamp, name, version, author_id, publisher)
+                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
         e.description = description;
         e.validate()
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
@@ -205,7 +279,7 @@ mod lez_registry {
         write(&mut global.account, &bytes)?;
 
         Ok(SpelOutput::execute(
-            vec![entry, global, directory, author],
+            vec![entry, global, directory, clock, author],
             vec![],
         ))
     }
@@ -322,6 +396,7 @@ mod lez_registry {
         ctx: ProgramContext,
         #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
         #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
+        clock: AccountWithMetadata,
         #[account(signer)] attester: AccountWithMetadata,
         entry_seed: [u8; 32],
         rebuilt: [u8; 32],
@@ -339,9 +414,10 @@ mod lez_registry {
         let was_verified = e.verification.is_verified();
         let subject = e.program_id;
 
-        let outcome = e
-            .verification
-            .record_rebuild(rebuilt, subject, *attester.account_id.value());
+        let stamp = read_clock(&clock)?;
+        let outcome =
+            e.verification
+                .record_rebuild(rebuilt, subject, *attester.account_id.value(), stamp);
 
         // Returning Err here would discard the write: an erroring instruction
         // aborts the transaction, so the post-state never lands. That was this
@@ -354,18 +430,21 @@ mod lez_registry {
         // named, committed by returning Ok. Nobody can grief an entry this way,
         // because the verdict is a function of the claim the author wrote --
         // anyone reading it can already see the build was networked.
-        let networked = matches!(
+        // Two of the three failures are *outcomes* and have to survive: a
+        // networked build and a mismatch both leave a state a reader needs. An
+        // erroring instruction aborts its transaction, so persisting them means
+        // returning Ok -- see the comment on the earlier shape of this code.
+        let recorded = matches!(
             outcome,
             Err(lez_registry_core::RegistryError::NetworkedBuild)
+                | Err(lez_registry_core::RegistryError::ArtifactMismatch)
         );
         if let Err(err) = outcome {
-            if !networked {
-                // A mismatch or a missing claim changes no state, so there is
-                // nothing to persist and the caller should be told plainly.
+            if !recorded {
                 return match err {
-                    lez_registry_core::RegistryError::ArtifactMismatch => Err(SpelError::custom(
+                    lez_registry_core::RegistryError::AlreadyVerified => Err(SpelError::custom(
                         E_NOT_VERIFIED,
-                        "the rebuild does not reproduce this entry's bytecode",
+                        "this entry is already verified; a mismatch assertion cannot erase it",
                     )),
                     _ => Err(SpelError::custom(E_BAD_CLAIM, "no claim to rebuild")),
                 };
@@ -374,15 +453,19 @@ mod lez_registry {
 
         store_entry(&mut entry.account, &e)?;
 
-        if networked {
-            // `global` is returned unmodified rather than dropped. The post-state
-            // must carry every account the instruction declares -- omitting one
-            // is refused by the runtime with the same silent message as every
-            // other failure, which cost a deploy cycle to find.
+        if recorded {
+            // `global` and `clock` are returned unmodified rather than dropped.
+            // The post-state must carry every account the instruction declares --
+            // omitting one is refused by the runtime with the same silent message
+            // as every other failure, which cost a deploy cycle to find.
             //
-            // Its counter deliberately does not move: Unreproducible is not a
-            // verification, and total_verified must never grow for one.
-            return Ok(SpelOutput::execute(vec![entry, global, attester], vec![]));
+            // The counter deliberately does not move: neither Unreproducible nor
+            // Mismatched is a verification, and total_verified must never grow
+            // for one.
+            return Ok(SpelOutput::execute(
+                vec![entry, global, clock, attester],
+                vec![],
+            ));
         }
 
         // Only the transition counts. Re-attesting an already-verified entry adds
@@ -400,7 +483,10 @@ mod lez_registry {
             write(&mut global.account, &bytes)?;
         }
 
-        Ok(SpelOutput::execute(vec![entry, global, attester], vec![]))
+        Ok(SpelOutput::execute(
+            vec![entry, global, clock, attester],
+            vec![],
+        ))
     }
 
     /// Freeze an entry. One-way: no instruction in this program lowers the flag,
