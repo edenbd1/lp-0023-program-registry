@@ -61,7 +61,7 @@ for the new build to inherit anything the old one had earned.
 ```bash
 cargo risczero build --manifest-path program/Cargo.toml
 spel program-id artifacts/programs/lez_registry.bin        # the ImageID
-cargo run -p lez-registry --release -- \
+cargo run --manifest-path cli/Cargo.toml --release -- \
   deployment-digest artifacts/programs/lez_registry.bin    # the deploy tx hash
 ```
 
