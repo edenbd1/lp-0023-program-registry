@@ -4,6 +4,11 @@
 
 use lez_registry_core::*;
 
+/// A third party doing the rebuild. Distinct from AUTHOR so that any test which
+/// accidentally conflates the two fails rather than passes quietly.
+const ATTESTER: AccountId = [0xAA; 32];
+const AUTHOR: AccountId = [0xBB; 32];
+
 fn env(network_disabled: bool) -> BuildEnvironment {
     BuildEnvironment {
         image_digest: [7u8; 32],
@@ -37,7 +42,7 @@ fn a_networked_rebuild_can_never_be_verified() {
     // Offline is therefore not a nicety, it is the whole mechanism.
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(false)).unwrap();
-    let err = v.record_rebuild(artifact, artifact).unwrap_err();
+    let err = v.record_rebuild(artifact, artifact, ATTESTER).unwrap_err();
     assert_eq!(err, RegistryError::NetworkedBuild);
     assert_eq!(v.state, VerificationState::Unreproducible);
     assert!(!v.is_verified());
@@ -47,7 +52,7 @@ fn a_networked_rebuild_can_never_be_verified() {
 fn an_offline_rebuild_that_matches_is_verified() {
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
-    v.record_rebuild(artifact, artifact).unwrap();
+    v.record_rebuild(artifact, artifact, ATTESTER).unwrap();
     assert_eq!(v.state, VerificationState::Verified);
     assert!(v.is_verified());
 }
@@ -57,7 +62,7 @@ fn a_rebuild_that_does_not_match_is_refused_rather_than_recorded() {
     let artifact = [3u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
     assert_eq!(
-        v.record_rebuild([4u8; 32], artifact).unwrap_err(),
+        v.record_rebuild([4u8; 32], artifact, ATTESTER).unwrap_err(),
         RegistryError::ArtifactMismatch
     );
     // And the state did not move: a failed rebuild leaves the claim a claim.
@@ -73,14 +78,14 @@ fn a_verification_cannot_go_stale_because_the_subject_is_the_key() {
     // is to be a different entry, and a verification stays true.
     let subject = [1u8; 32];
     let mut v = Verification::claim(claim_for(true)).unwrap();
-    v.record_rebuild(subject, subject).unwrap();
+    v.record_rebuild(subject, subject, ATTESTER).unwrap();
     assert!(v.is_verified());
 
     // There is no call that takes this entry to any other artifact. The nearest
     // thing to an upgrade is a rebuild claiming different bytecode, and that is
     // a mismatch -- refused, and it does not disturb what was already proven.
     assert_eq!(
-        v.record_rebuild([2u8; 32], subject).unwrap_err(),
+        v.record_rebuild([2u8; 32], subject, ATTESTER).unwrap_err(),
         RegistryError::ArtifactMismatch
     );
     assert!(
@@ -103,7 +108,7 @@ fn an_upgrade_is_a_different_entry_and_inherits_nothing() {
     );
 
     let mut first = Verification::claim(claim_for(true)).unwrap();
-    first.record_rebuild(v1, v1).unwrap();
+    first.record_rebuild(v1, v1, ATTESTER).unwrap();
     assert!(first.is_verified());
 
     let second = Verification::unclaimed();
@@ -118,7 +123,8 @@ fn an_upgrade_is_a_different_entry_and_inherits_nothing() {
 fn recording_a_rebuild_without_a_claim_is_refused() {
     let mut v = Verification::unclaimed();
     assert_eq!(
-        v.record_rebuild([1u8; 32], [1u8; 32]).unwrap_err(),
+        v.record_rebuild([1u8; 32], [1u8; 32], ATTESTER)
+            .unwrap_err(),
         RegistryError::Empty
     );
 }
@@ -259,4 +265,55 @@ fn a_claim_with_no_repository_is_refused() {
     let mut c = claim_for(true);
     c.repository = String::new();
     assert_eq!(Verification::claim(c).unwrap_err(), RegistryError::Empty);
+}
+
+#[test]
+fn a_verification_names_who_attested_to_it() {
+    // The chain cannot compile anything, so the registry cannot verify a build.
+    // Recording who says they rebuilt it is the difference between a fact the
+    // registry can support and a claim it cannot.
+    let subject = [1u8; 32];
+    let mut v = Verification::claim(claim_for(true)).unwrap();
+    assert_eq!(v.attester, None, "an unrebuilt claim vouches for nothing");
+
+    v.record_rebuild(subject, subject, ATTESTER).unwrap();
+    assert!(v.is_verified());
+    assert_eq!(v.attester, Some(ATTESTER));
+}
+
+#[test]
+fn a_self_attested_build_is_verified_but_flagged_as_such() {
+    // An author rebuilding their own release reproducibly is useful and is not
+    // an independent check. Both are true, so both are representable.
+    let subject = [1u8; 32];
+
+    let mut mine = Verification::claim(claim_for(true)).unwrap();
+    mine.record_rebuild(subject, subject, AUTHOR).unwrap();
+    assert!(mine.is_verified());
+    assert!(
+        mine.is_self_attested(&AUTHOR),
+        "the only voucher is the shipper, and a UI must be able to say so"
+    );
+
+    let mut theirs = Verification::claim(claim_for(true)).unwrap();
+    theirs.record_rebuild(subject, subject, ATTESTER).unwrap();
+    assert!(theirs.is_verified());
+    assert!(
+        !theirs.is_self_attested(&AUTHOR),
+        "an independent rebuild must not be labelled self-attested"
+    );
+}
+
+#[test]
+fn a_networked_rebuild_still_records_who_ran_it() {
+    // Unreproducible is an outcome someone produced, not weather. Without the
+    // attester it is impossible to tell a stalled claim from one that was tried
+    // and failed, or to tell who tried.
+    let subject = [1u8; 32];
+    let mut v = Verification::claim(claim_for(false)).unwrap();
+    let err = v.record_rebuild(subject, subject, ATTESTER).unwrap_err();
+    assert_eq!(err, RegistryError::NetworkedBuild);
+    assert_eq!(v.state, VerificationState::Unreproducible);
+    assert_eq!(v.attester, Some(ATTESTER));
+    assert!(!v.is_verified());
 }

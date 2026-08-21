@@ -186,6 +186,13 @@ pub struct Verification {
     pub state: VerificationState,
     /// The claim this verification concerns, if any.
     pub claim: Option<SourceClaim>,
+    /// Who attested to the rebuild.
+    ///
+    /// A chain cannot compile anything, so this registry cannot verify a build;
+    /// it can only record that a named party says they did. Storing the party is
+    /// what keeps `Verified` from being a claim the registry itself is making and
+    /// cannot support. `None` until a rebuild is recorded.
+    pub attester: Option<AccountId>,
 }
 
 impl Verification {
@@ -193,6 +200,7 @@ impl Verification {
         Self {
             state: VerificationState::Unclaimed,
             claim: None,
+            attester: None,
         }
     }
 
@@ -204,6 +212,7 @@ impl Verification {
         Ok(Self {
             state: VerificationState::Claimed,
             claim: Some(source),
+            attester: None,
         })
     }
 
@@ -215,7 +224,12 @@ impl Verification {
     /// bytecode, so such an argument could only ever equal `subject`, and a
     /// parameter that can only take one value is a place for a caller to be
     /// wrong.
-    pub fn record_rebuild(&mut self, rebuilt: ProgramId, subject: ProgramId) -> Result<()> {
+    pub fn record_rebuild(
+        &mut self,
+        rebuilt: ProgramId,
+        subject: ProgramId,
+        attester: AccountId,
+    ) -> Result<()> {
         let claim = match &self.claim {
             Some(c) => c,
             None => return Err(RegistryError::Empty),
@@ -229,16 +243,33 @@ impl Verification {
             // leave a mark, or the next caller reads `Claimed` and cannot tell
             // this was already attempted.
             self.state = VerificationState::Unreproducible;
+            self.attester = Some(attester);
             return Err(RegistryError::NetworkedBuild);
         }
         self.state = VerificationState::Verified;
+        self.attester = Some(attester);
         Ok(())
     }
 
     /// True only for a claim rebuilt offline against this entry's own bytecode.
     /// Once true it stays true: the subject cannot change underneath it.
+    ///
+    /// Read it with [`Self::attester`] in hand. This answers "was a matching
+    /// offline rebuild recorded", not "is this program trustworthy", and those
+    /// differ by exactly how much you trust whoever recorded it.
     pub const fn is_verified(&self) -> bool {
         matches!(self.state, VerificationState::Verified)
+    }
+
+    /// Whether the only party vouching for this build is the party that shipped
+    /// it.
+    ///
+    /// Not an accusation and not a failure: an author who rebuilds their own
+    /// release reproducibly has done something useful. It is weaker evidence than
+    /// an independent rebuild, and a UI that rendered both as one tick would be
+    /// hiding the difference that matters most.
+    pub fn is_self_attested(&self, author: &AccountId) -> bool {
+        self.is_verified() && self.attester.as_ref() == Some(author)
     }
 }
 

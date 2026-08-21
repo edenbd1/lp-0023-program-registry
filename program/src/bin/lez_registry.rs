@@ -219,6 +219,134 @@ mod lez_registry {
         Ok(SpelOutput::execute(vec![entry, author], vec![]))
     }
 
+    /// Attach a source claim to an entry. Author only, because the canonical
+    /// entry is the author's; a stranger who wants to assert something about
+    /// this program registers their own third-party entry and claims there.
+    ///
+    /// This deliberately proves nothing. It records that someone said where the
+    /// source is, which is the input to a rebuild, not a substitute for one.
+    #[instruction]
+    pub fn claim_source(
+        ctx: ProgramContext,
+        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
+        #[account(signer)] author: AccountWithMetadata,
+        entry_seed: [u8; 32],
+        repository: String,
+        commit: [u8; 20],
+        source_digest: [u8; 32],
+        image_digest: [u8; 32],
+        toolchain: String,
+        network_disabled: u8,
+    ) -> SpelResult {
+        let _ = entry_seed;
+        if entry.account.program_owner != ctx.self_program_id {
+            return Err(SpelError::custom(E_NOT_ANCHORED, "no entry at this address"));
+        }
+        let mut e = load_entry(&entry.account)?;
+        e.require_writable_by(author.account_id.value())
+            .map_err(|err| match err {
+                lez_registry_core::RegistryError::Immutable => {
+                    SpelError::custom(E_IMMUTABLE, "entry is frozen")
+                }
+                _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
+            })?;
+
+        let claim = lez_registry_core::SourceClaim {
+            repository,
+            commit,
+            source_digest,
+            build: lez_registry_core::BuildEnvironment {
+                image_digest,
+                toolchain,
+                // A u8 rather than a bool because the instruction encoding has no
+                // bool; anything other than 1 is read as "the network was up",
+                // so a caller who fumbles the flag gets the safe answer.
+                network_disabled: network_disabled == 1,
+            },
+        };
+        e.verification = lez_registry_core::Verification::claim(claim)
+            .map_err(|_| SpelError::custom(E_BAD_CLAIM, "claim fields are empty or too long"))?;
+        store_entry(&mut entry.account, &e)?;
+        Ok(SpelOutput::execute(vec![entry, author], vec![]))
+    }
+
+    /// Record that a rebuild of the claimed source reproduced this entry's
+    /// bytecode.
+    ///
+    /// **Anyone may call this**, and that is the design rather than an oversight.
+    /// Restricting it to the author would make `Verified` mean "the author says
+    /// so", which is what the state exists to improve on. Opening it means the
+    /// signer is written down as the attester, so the badge always carries a name
+    /// and a reader decides whose word it is worth.
+    ///
+    /// A chain cannot compile, so nothing here checks that the rebuild happened.
+    /// What it checks is that the claimed environment had the network disabled —
+    /// the one condition under which a matching rebuild is evidence at all.
+    #[instruction]
+    pub fn record_rebuild(
+        ctx: ProgramContext,
+        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
+        #[account(mut, pda = [literal("lez-registry:global:v1")])]
+        mut global: AccountWithMetadata,
+        #[account(signer)] attester: AccountWithMetadata,
+        entry_seed: [u8; 32],
+        rebuilt: [u8; 32],
+    ) -> SpelResult {
+        let _ = entry_seed;
+        if entry.account.program_owner != ctx.self_program_id
+            || global.account.program_owner != ctx.self_program_id
+        {
+            return Err(SpelError::custom(
+                E_NOT_ANCHORED,
+                "entry or global state is not owned by this program",
+            ));
+        }
+        let mut e = load_entry(&entry.account)?;
+        let was_verified = e.verification.is_verified();
+        let subject = e.program_id;
+
+        let outcome =
+            e.verification
+                .record_rebuild(rebuilt, subject, *attester.account_id.value());
+
+        // A networked build is refused *and* recorded: the state moves to
+        // Unreproducible and names who tried, so the attempt is not invisible to
+        // the next caller. Persist before returning the error.
+        if let Err(err) = outcome {
+            store_entry(&mut entry.account, &e)?;
+            return match err {
+                lez_registry_core::RegistryError::NetworkedBuild => Err(SpelError::custom(
+                    E_NOT_VERIFIED,
+                    "the claimed build ran with the network up",
+                )),
+                lez_registry_core::RegistryError::ArtifactMismatch => Err(SpelError::custom(
+                    E_NOT_VERIFIED,
+                    "the rebuild does not reproduce this entry's bytecode",
+                )),
+                _ => Err(SpelError::custom(E_BAD_CLAIM, "no claim to rebuild")),
+            };
+        }
+
+        store_entry(&mut entry.account, &e)?;
+
+        // Only the transition counts. Re-attesting an already-verified entry adds
+        // an attester, not a verified program, and a counter that grew each time
+        // would overstate the registry's own coverage.
+        if !was_verified {
+            let mut g = GlobalAccount::try_from_slice(&global.account.data)
+                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
+            g.total_verified = g
+                .total_verified
+                .checked_add(1)
+                .ok_or_else(|| SpelError::custom(E_BAD_ENTRY, "verified counter overflow"))?;
+            let bytes = borsh::to_vec(&g)
+                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
+            write(&mut global.account, &bytes)?;
+        }
+
+        Ok(SpelOutput::execute(vec![entry, global, attester], vec![]))
+    }
+
     /// Freeze an entry. One-way: no instruction in this program lowers the flag,
     /// which is the only thing that makes immutability worth anything.
     #[instruction]

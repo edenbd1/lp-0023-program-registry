@@ -151,6 +151,140 @@
       ]
     },
     {
+      "name": "claim_source",
+      "accounts": [
+        {
+          "name": "entry",
+          "writable": false,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "entry_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "author",
+          "writable": false,
+          "signer": true,
+          "init": false
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "repository",
+          "type": "string"
+        },
+        {
+          "name": "commit",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          }
+        },
+        {
+          "name": "source_digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "image_digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "toolchain",
+          "type": "string"
+        },
+        {
+          "name": "network_disabled",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "record_rebuild",
+      "accounts": [
+        {
+          "name": "entry",
+          "writable": false,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "entry_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "global",
+          "writable": true,
+          "signer": false,
+          "init": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": "lez-registry:global:v1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "attester",
+          "writable": false,
+          "signer": true,
+          "init": false
+        }
+      ],
+      "args": [
+        {
+          "name": "entry_seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "rebuilt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "freeze",
       "accounts": [
         {

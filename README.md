@@ -89,6 +89,32 @@ is four states a UI can actually render, none of which is unreachable.
 "currently deployed" argument, because such an argument could only ever hold one
 value, and a parameter with one legal value is somewhere for a caller to be wrong.
 
+### The badge carries a name, because the chain cannot compile
+
+A registry cannot verify a build. It has no compiler, and a rebuild is a claim
+made *about* the world rather than a computation the runtime can redo. Every
+registry that prints "Verified" is therefore relaying somebody's word, and the
+only real choice is whether it tells you whose.
+
+`record_rebuild` is callable by anyone and records the signer as the entry's
+`attester`. Restricting it to the author would make `Verified` mean "the author
+says so", which is the thing the state exists to improve on; opening it without
+recording who called would make the badge anonymous, which is worse. So the badge
+always comes with a name, and `is_self_attested` answers the question a reader
+actually has — is the only party vouching for this build the party that shipped
+it?
+
+That is not an accusation. An author who rebuilds their own release reproducibly
+has done something useful; it is simply weaker evidence than an independent
+rebuild, and rendering both as one tick would hide the difference that matters
+most. A failed attempt is recorded too: a rebuild claiming a networked build
+lands on `Unreproducible` *and* keeps the attester, so a stalled claim and a
+tried-and-failed one are distinguishable.
+
+What the chain does enforce is the one condition that makes a matching rebuild
+mean anything: the claimed environment must have had the network disabled. That
+check is cheap, and it is the check the Solana incident turned on.
+
 ## The design decisions, taken and justified
 
 The prize leaves four questions open. Our positions:
