@@ -168,8 +168,36 @@ another.
 ## Layout
 
 - `src/lib.rs` — entry types, address derivation, the verification state
-  machine. `no_std`, no I/O, so the on-chain program and the CLI link the *same*
-  rules rather than two implementations that agree until they do not.
+  machine. `no_std`, no I/O, so the on-chain program and every client link the
+  *same* rules rather than two implementations that agree until they do not.
+- `program/` — the SPEL program: `initialize`, `register`, `claim_source`,
+  `record_rebuild`, `update`, `freeze`.
+- `cli/` — `deployment-digest`, `entry-address`, `verify`, and `explain-entry`,
+  which reports what a state supports rather than whether it has a badge.
+- `sdk/` — resolve an entry from a program id: one hash, one account read, no
+  index. Its tests pin the derivation against addresses that exist on the public
+  testnet, because a wrong derivation still returns a well-formed address that
+  simply has nothing at it.
+- `indexer/` — optional, self-hostable search. Holds no database and rebuilds
+  from the chain, and every result it returns can be re-derived without it.
+- `zkvm/` — the cycle harness behind [`CYCLES.md`](CYCLES.md).
+- `scripts/build-sealed.sh` — the guest build with the container's network
+  disabled. Only a binary from this may be claimed `network_disabled=1`.
+- `scripts/verify-source.sh` — what a rebuild establishes, and what it does not.
+- `scripts/verify-onchain.sh` — re-checks every claim in
+  [`DEPLOYMENTS.md`](DEPLOYMENTS.md) against the live testnet, controls included.
+- `scripts/demo.sh` — read-only walk through the live registry, macOS and Linux.
+
+## Measured, not asserted
+
+- [`DEPLOYMENTS.md`](DEPLOYMENTS.md) — what is live, including the same
+  instruction refusing a rebuild that matched.
+- [`CYCLES.md`](CYCLES.md) — a whole `register` body is 0.0197% of LEZ's 32M cap;
+  hashing this registry's own artifact on chain would be 91% of it, which is the
+  second and independent reason verification stays off chain.
+- [`LATENCY.md`](LATENCY.md) — 500 live lookups. Addresses that hold an entry and
+  addresses that never did resolve in 160ms and 159ms, which is what "lookup does
+  not depend on registry size" looks like when it is measured instead of claimed.
 
 ## Licence
 
