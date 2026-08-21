@@ -39,7 +39,10 @@ use alloc::vec::Vec;
 use borsh::{BorshDeserialize, BorshSerialize};
 use sha2::{Digest, Sha256};
 
-/// A LEZ program identifier: the content address of its bytecode.
+/// A LEZ program identifier: the RISC0 ImageID of its guest ELF.
+///
+/// Not a hash of the deployed file — see [`deployment_digest`] for why the two
+/// are different numbers and what each one is good for.
 pub type ProgramId = [u8; 32];
 
 /// A 32-byte account identifier.
@@ -393,11 +396,29 @@ pub fn global_seed() -> [u8; 32] {
     h.finalize().into()
 }
 
-/// The digest a rebuild must reproduce: LEZ's own content addressing, so a
-/// registry hash and a deploy address are the same number rather than two
-/// numbers that usually agree.
+/// The content address of a **deployment**: `SHA256(u32_le(len) ‖ bytecode)`.
+///
+/// THIS IS NOT THE PROGRAM ID, AND THE DIFFERENCE COST US A BUG
+///
+/// It is what the deploy transaction hashes to — deploying
+/// `lez_registry.bin` produced transaction
+/// `447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604`, which is
+/// exactly this function's output on that file. Useful, and *not* the identifier
+/// a program is called by.
+///
+/// The **ProgramId is the RISC0 ImageID**, derived from the ELF's own structure
+/// rather than by hashing the packaged file, and for the same binary it is
+/// `f6a765c2a316da6344de3cccfb39868732a4102f93ff9f0cc8d55be2d7c9e577`. A
+/// registry keyed on the wrong one of these would resolve nothing, so this crate
+/// names them apart and never computes the ImageID itself: read it with
+/// `spel program-id`, or with risc0's `binfmt`, which is where the definition
+/// lives.
+///
+/// Keeping the deployment digest is still worth it — it is how you check that
+/// the file you hold is the file that was deployed, independently of any
+/// explorer.
 #[must_use]
-pub fn program_id_of(bytecode: &[u8]) -> ProgramId {
+pub fn deployment_digest(bytecode: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update((bytecode.len() as u32).to_le_bytes());
     h.update(bytecode);

@@ -19,6 +19,35 @@ say they are, or that the code does what its README claims. Anywhere this
 registry shows verification status it will say so, because a green tick teaches
 users the opposite.
 
+### Two digests, and the registry says which is which
+
+A program on LEZ has two 32-byte numbers attached to it, and they are not the
+same number:
+
+| | what it is | how you get it |
+|---|---|---|
+| **ProgramId** | the RISC0 ImageID, derived from the guest ELF's own structure | `spel program-id`, or risc0's `binfmt` |
+| **deployment digest** | `SHA256(u32_le(len) ‖ bytes)` over the packaged `.bin` | `lez-registry deployment-digest` |
+
+For this registry's own program those are
+`f6a765c2a316da6344de3cccfb39868732a4102f93ff9f0cc8d55be2d7c9e577` and
+`447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604`.
+
+The second one is also the hash of the transaction that deployed it — which is
+the useful thing about it, and the trap. It is tempting to read
+`SHA256(len ‖ bytes)` as "LEZ's content addressing" and key a registry on it, so
+that an entry's hash and the program's address are one number instead of two
+that usually agree. That is wrong, and it was wrong here first: the CLI printed
+the deploy transaction hash under the heading `program-id` until it was run
+against a real deployment and disagreed with `spel`. A registry keyed that way
+resolves nothing, because nothing ever calls a program by that number.
+
+So the crate names them apart, and never computes the ImageID itself — that
+definition lives in risc0, and a second implementation of it would be a second
+thing that can drift. What the registry stores is the ProgramId as the key and
+the deployment digest as the artifact, and `verify` reports which of the two it
+checked.
+
 ### A hash match is not provenance
 
 Solana's verified builds were subverted by a repository whose `build.rs`

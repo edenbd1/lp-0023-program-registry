@@ -190,17 +190,21 @@ fn the_seeds_are_domain_separated() {
 }
 
 #[test]
-fn the_program_id_is_lez_content_addressing_not_a_plain_hash() {
-    // The registry's notion of "which bytecode" must be the chain's, or a
-    // verified entry would be verified against a number the chain never uses.
-    // LEZ hashes the little-endian length before the bytes, so two inputs that
-    // differ only by framing get different ids.
-    let a = program_id_of(b"\x00\x01");
-    let b = program_id_of(b"\x00\x01\x00");
+fn the_deployment_digest_is_lez_framing_not_a_plain_hash() {
+    // Found by running the CLI against a real deployment rather than by reading
+    // the code: this function's output on lez_registry.bin is the *deploy
+    // transaction hash*, while the program is called by its RISC0 ImageID,
+    // which is a different number derived from the ELF. Both matter; keying a
+    // registry on the wrong one would resolve nothing.
+    //
+    // LEZ frames the little-endian length before the bytes, so two inputs that
+    // differ only by framing get different digests.
+    let a = deployment_digest(b"\x00\x01");
+    let b = deployment_digest(b"\x00\x01\x00");
     assert_ne!(a, b);
     assert_ne!(a, [0u8; 32]);
     // Deterministic, which is the entire premise of a reproducible build.
-    assert_eq!(a, program_id_of(b"\x00\x01"));
+    assert_eq!(a, deployment_digest(b"\x00\x01"));
 }
 
 #[test]

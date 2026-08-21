@@ -1,0 +1,17 @@
+[package]
+name    = "lez-registry-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Derive registry addresses, verify a deployed program against its source, and print what the registry holds."
+
+[[bin]]
+name = "lez-registry"
+path = "src/main.rs"
+
+[dependencies]
+lez-registry-core = { path = ".." }
+sha2 = "0.10"
+
+[profile.release]
+overflow-checks = true
