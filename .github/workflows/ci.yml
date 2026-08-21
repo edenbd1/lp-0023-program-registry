@@ -37,3 +37,34 @@ jobs:
         run: |
           rustup target add thumbv7em-none-eabi
           cargo build --release --target thumbv7em-none-eabi
+
+      # The CLI, SDK, indexer and program are separate workspaces, so none of
+      # the steps above touches them. A green tick that covered only the core
+      # while the README pointed at four crates would be worse than no tick.
+      - name: The other crates, same standard
+        run: |
+          for crate in cli sdk indexer; do
+            echo "::group::$crate"
+            cargo fmt --manifest-path "$crate/Cargo.toml" -- --check
+            cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets -- -D warnings
+            cargo test --release --manifest-path "$crate/Cargo.toml"
+            echo "::endgroup::"
+          done
+
+      # The program is a RISC0 guest: `risc0_zkvm::guest::entry!(main)` only
+      # resolves when it is built as the guest binary, so `cargo test` cannot
+      # build it and its absence from the loop above is deliberate. Building it
+      # still catches every type error the instructions can have.
+      - name: The guest program compiles
+        run: |
+          cargo fmt --manifest-path program/Cargo.toml -- --check
+          cargo build --release --manifest-path program/Cargo.toml
+
+      # Scripts are deliverables here, not glue: verify-onchain.sh and demo.sh
+      # are how a reader checks the claims. A syntax error in one is a broken
+      # claim.
+      - name: Shell scripts parse
+        run: |
+          for s in scripts/*.sh scripts/sealed/docker; do
+            bash -n "$s" || exit 1
+          done

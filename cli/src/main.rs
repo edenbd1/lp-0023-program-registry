@@ -213,7 +213,9 @@ fn hex(b: &[u8; 32]) -> String {
 /// carries a badge.
 fn explain_entry(args: &[String]) -> ExitCode {
     let Some(raw) = args.get(1) else {
-        eprintln!("explain-entry <HEX> — the `entry` field from `spel inspect --type EntryAccount`");
+        eprintln!(
+            "explain-entry <HEX> — the `entry` field from `spel inspect --type EntryAccount`"
+        );
         return ExitCode::FAILURE;
     };
     let bytes = match parse_hex_blob(raw.trim()) {
@@ -295,7 +297,7 @@ fn explain_entry(args: &[String]) -> ExitCode {
 
 fn parse_hex_blob(s: &str) -> Option<Vec<u8>> {
     let s = s.trim_start_matches("0x");
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())

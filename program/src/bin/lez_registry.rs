@@ -85,7 +85,10 @@ mod lez_registry {
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry payload failed to decode"))
     }
 
-    fn store_entry(account: &mut Account, entry: &lez_registry_core::Entry) -> Result<(), SpelError> {
+    fn store_entry(
+        account: &mut Account,
+        entry: &lez_registry_core::Entry,
+    ) -> Result<(), SpelError> {
         let payload = borsh::to_vec(entry)
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry failed to encode"))?;
         let wrapper = borsh::to_vec(&EntryAccount { entry: payload })
@@ -97,8 +100,7 @@ mod lez_registry {
     /// counters, so there is nothing for a first caller to capture.
     #[instruction]
     pub fn initialize(
-        #[account(init, pda = [literal("lez-registry:global:v1")])]
-        mut global: AccountWithMetadata,
+        #[account(init, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
     ) -> SpelResult {
         let bytes = borsh::to_vec(&GlobalAccount::default())
             .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
@@ -121,8 +123,7 @@ mod lez_registry {
     pub fn register(
         ctx: ProgramContext,
         #[account(init, pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])]
-        mut global: AccountWithMetadata,
+        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
         #[account(init, pda = arg("seq_seed"))] mut directory: AccountWithMetadata,
         #[account(signer)] author: AccountWithMetadata,
         entry_seed: [u8; 32],
@@ -151,9 +152,7 @@ mod lez_registry {
         // runtime needs it to place the account, but a supplied seed that does
         // not match the derivation would let a caller put an entry anywhere.
         let expected = match publisher {
-            lez_registry_core::Publisher::Canonical => {
-                lez_registry_core::entry_seed(&program_id)
-            }
+            lez_registry_core::Publisher::Canonical => lez_registry_core::entry_seed(&program_id),
             lez_registry_core::Publisher::ThirdParty => {
                 lez_registry_core::third_party_entry_seed(&program_id, &author_id)
             }
@@ -226,7 +225,10 @@ mod lez_registry {
     ) -> SpelResult {
         let _ = entry_seed;
         if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(E_NOT_ANCHORED, "no entry at this address"));
+            return Err(SpelError::custom(
+                E_NOT_ANCHORED,
+                "no entry at this address",
+            ));
         }
         let mut e = load_entry(&entry.account)?;
         e.require_writable_by(author.account_id.value())
@@ -270,7 +272,10 @@ mod lez_registry {
     ) -> SpelResult {
         let _ = entry_seed;
         if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(E_NOT_ANCHORED, "no entry at this address"));
+            return Err(SpelError::custom(
+                E_NOT_ANCHORED,
+                "no entry at this address",
+            ));
         }
         let mut e = load_entry(&entry.account)?;
         e.require_writable_by(author.account_id.value())
@@ -316,8 +321,7 @@ mod lez_registry {
     pub fn record_rebuild(
         ctx: ProgramContext,
         #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])]
-        mut global: AccountWithMetadata,
+        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
         #[account(signer)] attester: AccountWithMetadata,
         entry_seed: [u8; 32],
         rebuilt: [u8; 32],
@@ -335,9 +339,9 @@ mod lez_registry {
         let was_verified = e.verification.is_verified();
         let subject = e.program_id;
 
-        let outcome =
-            e.verification
-                .record_rebuild(rebuilt, subject, *attester.account_id.value());
+        let outcome = e
+            .verification
+            .record_rebuild(rebuilt, subject, *attester.account_id.value());
 
         // Returning Err here would discard the write: an erroring instruction
         // aborts the transaction, so the post-state never lands. That was this
@@ -410,15 +414,19 @@ mod lez_registry {
     ) -> SpelResult {
         let _ = entry_seed;
         if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(E_NOT_ANCHORED, "no entry at this address"));
+            return Err(SpelError::custom(
+                E_NOT_ANCHORED,
+                "no entry at this address",
+            ));
         }
         let mut e = load_entry(&entry.account)?;
-        e.freeze(author.account_id.value()).map_err(|err| match err {
-            lez_registry_core::RegistryError::Immutable => {
-                SpelError::custom(E_IMMUTABLE, "entry is already frozen")
-            }
-            _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
-        })?;
+        e.freeze(author.account_id.value())
+            .map_err(|err| match err {
+                lez_registry_core::RegistryError::Immutable => {
+                    SpelError::custom(E_IMMUTABLE, "entry is already frozen")
+                }
+                _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
+            })?;
         store_entry(&mut entry.account, &e)?;
         Ok(SpelOutput::execute(vec![entry, author], vec![]))
     }
