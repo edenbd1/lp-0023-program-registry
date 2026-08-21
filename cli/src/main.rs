@@ -260,6 +260,11 @@ fn explain_entry(args: &[String]) -> ExitCode {
             println!("  verification unreproducible");
             println!("               A rebuild was recorded but the claimed build had network");
             println!("               access, so a match would prove nothing about the source.");
+            // Who tried matters most in exactly this case: it separates a claim
+            // nobody has looked at from one that was examined and did not hold.
+            if let Some(a) = e.verification.attester {
+                println!("               attempted by {}", hex(&a));
+            }
         }
         core_::VerificationState::Verified => {
             let attester = e.verification.attester;

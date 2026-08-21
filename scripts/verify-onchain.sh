@@ -34,10 +34,14 @@ check() { # label tx expect_present
 }
 
 echo "registry on $RPC"
-check deploy      d5ce586aa075ae0b7f87c6a0fc3db08b9bd500181b259a0eb4e3b765d7827b96 yes
-check initialize  e3eaedd021fa0f49a58867c69cd15fe455dc3c7b5d02ffe4d7c9f2c6befd45ee yes
-check register    5dcae30b296b88232a83973d62a329f8a17784094dd221484c129fa4608d37db yes
-check prior-build 447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604 yes
+check deploy         0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 yes
+check record-rebuild a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca yes
+# Every earlier build is a different program, not a stale link, so each stays
+# checkable. A row that stopped resolving would mean the chain lost it.
+check build-17342    447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604 yes
+check build-17358    d5ce586aa075ae0b7f87c6a0fc3db08b9bd500181b259a0eb4e3b765d7827b96 yes
+check build-17398    7b1bc3ca7748c0069ebbb90b52863cc9fa219a1155295f5ecf5046df97f9bf06 yes
+check build-17414    e4ef3af04bea59c969019fa2831278983709bd3d33a5163004a4fdd950d44f81 yes
 
 # The deployment digest is not merely *like* the deploy transaction hash; it is
 # that hash. Recompute it from the binary in the tree and require equality, so a
@@ -50,7 +54,7 @@ b=open(sys.argv[1],'rb').read()
 print(hashlib.sha256(struct.pack('<I',len(b))+b).hexdigest())
 PY
 )
-  if [ "$got" = d5ce586aa075ae0b7f87c6a0fc3db08b9bd500181b259a0eb4e3b765d7827b96 ]; then
+  if [ "$got" = 0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 ]; then
     printf '  OK   %-22s recomputes to the deploy transaction hash\n' "digest"
   else
     printf '  FAIL %-22s got %s\n' "digest" "$got"
