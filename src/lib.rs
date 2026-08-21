@@ -142,9 +142,6 @@ pub struct SourceClaim {
     /// Hash over the source tree actually compiled. Survives the repository.
     pub source_digest: [u8; 32],
     pub build: BuildEnvironment,
-    /// The bytecode this claim is about. Verification is **version-bound**: a
-    /// claim is about one artifact and says nothing about any other.
-    pub artifact: ProgramId,
 }
 
 impl SourceClaim {
@@ -161,6 +158,14 @@ impl SourceClaim {
 
 /// What the registry knows about an entry's build, as four states a UI must be
 /// able to tell apart.
+///
+/// There is no `Stale`, and its absence is a design decision rather than an
+/// omission. Registries for account-addressed chains need one, because the code
+/// at an address can be replaced under a verification that was honestly earned.
+/// Here an entry is keyed by its ImageID, so the bytecode *is* the key: nothing
+/// can be swapped beneath it, and a verification that was ever true stays true.
+/// Modelling a state that cannot be reached would mean writing branches no test
+/// can exercise and a UI legend for something a user will never see.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum VerificationState {
     /// No source has been claimed. The honest default.
@@ -172,14 +177,10 @@ pub enum VerificationState {
     /// The rebuild happened but cannot count — it ran with the network up, so
     /// the build could have fetched the artifact it was meant to reproduce.
     Unreproducible,
-    /// A claim was verified against an artifact that is no longer the deployed
-    /// one. Not "verified", not "unverified": *stale*, and it names the artifact
-    /// it was true of.
-    Stale { verified_artifact: ProgramId },
 }
 
-/// The verification attached to an entry, kept as its own type so that no code
-/// path can set a state without also saying which artifact it is about.
+/// The verification attached to an entry, kept as its own type so a state and
+/// the claim it is about cannot be set independently and drift.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Verification {
     pub state: VerificationState,
@@ -208,27 +209,25 @@ impl Verification {
 
     /// Record the outcome of a rebuild.
     ///
-    /// `rebuilt` is the program id the rebuild produced. It must equal the
-    /// artifact the claim is about *and* the artifact deployed, and the build
-    /// must have been offline. Any other combination lands somewhere that is not
-    /// `Verified`, deliberately.
-    pub fn record_rebuild(&mut self, rebuilt: ProgramId, deployed: ProgramId) -> Result<()> {
+    /// `rebuilt` is the ImageID the rebuild produced; `subject` is the entry's
+    /// own key. There is deliberately no third "currently deployed" argument to
+    /// reconcile against: on a content-addressed chain the key *is* the
+    /// bytecode, so such an argument could only ever equal `subject`, and a
+    /// parameter that can only take one value is a place for a caller to be
+    /// wrong.
+    pub fn record_rebuild(&mut self, rebuilt: ProgramId, subject: ProgramId) -> Result<()> {
         let claim = match &self.claim {
             Some(c) => c,
             None => return Err(RegistryError::Empty),
         };
-        if claim.artifact != deployed {
-            // The claim is about something other than what is deployed. That is
-            // staleness, not failure, and the two deserve different words.
-            self.state = VerificationState::Stale {
-                verified_artifact: claim.artifact,
-            };
-            return Ok(());
-        }
-        if rebuilt != deployed {
+        if rebuilt != subject {
             return Err(RegistryError::ArtifactMismatch);
         }
         if !claim.build.network_disabled {
+            // Set the state as well as returning the error: a build that could
+            // have downloaded the very artifact it was meant to reproduce must
+            // leave a mark, or the next caller reads `Claimed` and cannot tell
+            // this was already attempted.
             self.state = VerificationState::Unreproducible;
             return Err(RegistryError::NetworkedBuild);
         }
@@ -236,33 +235,8 @@ impl Verification {
         Ok(())
     }
 
-    /// Called when the deployed artifact changes. Verification is bound to a
-    /// version, so an upgrade cannot inherit the old one's status.
-    pub fn on_artifact_changed(&mut self, new_artifact: ProgramId) {
-        match &self.state {
-            VerificationState::Verified => {
-                let was = self.claim.as_ref().map_or([0u8; 32], |c| c.artifact);
-                self.state = VerificationState::Stale {
-                    verified_artifact: was,
-                };
-            }
-            VerificationState::Claimed | VerificationState::Unreproducible => {
-                let still_about_it = self
-                    .claim
-                    .as_ref()
-                    .is_some_and(|c| c.artifact == new_artifact);
-                if !still_about_it {
-                    self.state = VerificationState::Unclaimed;
-                    self.claim = None;
-                }
-            }
-            VerificationState::Unclaimed | VerificationState::Stale { .. } => {}
-        }
-    }
-
-    /// True only for a claim rebuilt offline against the deployed artifact.
-    /// Everything else, including `Stale`, is false — because "it was verified
-    /// once" is not a property a user can act on.
+    /// True only for a claim rebuilt offline against this entry's own bytecode.
+    /// Once true it stays true: the subject cannot change underneath it.
     pub const fn is_verified(&self) -> bool {
         matches!(self.state, VerificationState::Verified)
     }

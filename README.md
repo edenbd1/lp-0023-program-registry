@@ -68,15 +68,26 @@ different state in the type system.
 | `Claimed` | a source is asserted and nobody has rebuilt it |
 | `Verified` | rebuilt offline, and the bytecode matched what is deployed |
 | `Unreproducible` | rebuilt, but with the network up, so the match proves nothing |
-| `Stale { verified_artifact }` | was verified, of a build that is no longer deployed — and it names which |
 
-`Stale` exists because "failed" reads as *someone tried to cheat* while an
-upgraded program is simply a program that moved on. Conflating them either
-slanders honest authors or excuses dishonest ones.
+**There is deliberately no `Stale`.** Registries for account-addressed chains
+need one: code at an address can be replaced under a verification that was
+honestly earned, so the badge has to decay, and the decay has to be distinguished
+from failure — "failed" reads as *someone tried to cheat*, while an upgraded
+program has simply moved on.
 
-**Verification is version-bound.** An upgrade cannot inherit the previous
-badge — otherwise an author verifies something benign, upgrades to anything, and
-keeps it. `on_artifact_changed` is what enforces that, and a test asserts it.
+None of that applies here, and it took removing a working implementation of it to
+see why. An entry is keyed by its ImageID, so the bytecode *is* the key. Nothing
+can be swapped beneath an entry. The only way to have different bytecode is to be
+a different entry, which starts `Unclaimed` like every other.
+
+So verification is still version-bound — an author cannot verify something benign,
+upgrade to anything, and keep the badge — but the binding lives in the addressing
+rather than in a state transition, and costs no state machine at all. What is left
+is four states a UI can actually render, none of which is unreachable.
+
+`record_rebuild` takes the entry's own key as its subject and has no third
+"currently deployed" argument, because such an argument could only ever hold one
+value, and a parameter with one legal value is somewhere for a caller to be wrong.
 
 ## The design decisions, taken and justified
 

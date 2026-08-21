@@ -12,13 +12,12 @@ fn env(network_disabled: bool) -> BuildEnvironment {
     }
 }
 
-fn claim_for(artifact: ProgramId, network_disabled: bool) -> SourceClaim {
+fn claim_for(network_disabled: bool) -> SourceClaim {
     SourceClaim {
         repository: "https://github.com/example/prog".into(),
         commit: [1u8; 20],
         source_digest: [2u8; 32],
         build: env(network_disabled),
-        artifact,
     }
 }
 
@@ -26,7 +25,7 @@ fn claim_for(artifact: ProgramId, network_disabled: bool) -> SourceClaim {
 fn a_claim_is_not_a_verification() {
     // Typing a URL must not mint trust. Anyone can assert anything about a
     // program; the registry records the assertion and says it is only that.
-    let v = Verification::claim(claim_for([9u8; 32], true)).unwrap();
+    let v = Verification::claim(claim_for(true)).unwrap();
     assert_eq!(v.state, VerificationState::Claimed);
     assert!(!v.is_verified());
 }
@@ -37,7 +36,7 @@ fn a_networked_rebuild_can_never_be_verified() {
     // makes the rebuild match trivially while proving nothing about the source.
     // Offline is therefore not a nicety, it is the whole mechanism.
     let artifact = [3u8; 32];
-    let mut v = Verification::claim(claim_for(artifact, false)).unwrap();
+    let mut v = Verification::claim(claim_for(false)).unwrap();
     let err = v.record_rebuild(artifact, artifact).unwrap_err();
     assert_eq!(err, RegistryError::NetworkedBuild);
     assert_eq!(v.state, VerificationState::Unreproducible);
@@ -47,7 +46,7 @@ fn a_networked_rebuild_can_never_be_verified() {
 #[test]
 fn an_offline_rebuild_that_matches_is_verified() {
     let artifact = [3u8; 32];
-    let mut v = Verification::claim(claim_for(artifact, true)).unwrap();
+    let mut v = Verification::claim(claim_for(true)).unwrap();
     v.record_rebuild(artifact, artifact).unwrap();
     assert_eq!(v.state, VerificationState::Verified);
     assert!(v.is_verified());
@@ -56,7 +55,7 @@ fn an_offline_rebuild_that_matches_is_verified() {
 #[test]
 fn a_rebuild_that_does_not_match_is_refused_rather_than_recorded() {
     let artifact = [3u8; 32];
-    let mut v = Verification::claim(claim_for(artifact, true)).unwrap();
+    let mut v = Verification::claim(claim_for(true)).unwrap();
     assert_eq!(
         v.record_rebuild([4u8; 32], artifact).unwrap_err(),
         RegistryError::ArtifactMismatch
@@ -66,61 +65,53 @@ fn a_rebuild_that_does_not_match_is_refused_rather_than_recorded() {
 }
 
 #[test]
-fn a_claim_about_another_artifact_is_stale_not_failed() {
-    // The distinction matters on screen. "Failed" reads as "someone tried to
-    // cheat"; "stale" reads as "this was true of an older build", which is what
-    // an upgraded program actually is.
-    let deployed = [5u8; 32];
-    let old = [4u8; 32];
-    let mut v = Verification::claim(claim_for(old, true)).unwrap();
-    v.record_rebuild(old, deployed).unwrap();
-    assert_eq!(
-        v.state,
-        VerificationState::Stale {
-            verified_artifact: old
-        }
-    );
-    assert!(!v.is_verified(), "stale must not read as verified");
-}
-
-#[test]
-fn an_upgrade_cannot_inherit_the_previous_verification() {
-    // Verification is version-bound. Without this, an author could verify a
-    // benign build, upgrade to anything, and keep the badge.
-    let first = [1u8; 32];
-    let mut v = Verification::claim(claim_for(first, true)).unwrap();
-    v.record_rebuild(first, first).unwrap();
+fn a_verification_cannot_go_stale_because_the_subject_is_the_key() {
+    // The state a registry for an account-addressed chain needs most is the one
+    // this type cannot express. There, code at an address can be replaced under
+    // an honestly earned verification, so "verified" has to decay. Here the
+    // entry is keyed by the ImageID, so the only way to have different bytecode
+    // is to be a different entry, and a verification stays true.
+    let subject = [1u8; 32];
+    let mut v = Verification::claim(claim_for(true)).unwrap();
+    v.record_rebuild(subject, subject).unwrap();
     assert!(v.is_verified());
 
-    v.on_artifact_changed([2u8; 32]);
+    // There is no call that takes this entry to any other artifact. The nearest
+    // thing to an upgrade is a rebuild claiming different bytecode, and that is
+    // a mismatch -- refused, and it does not disturb what was already proven.
     assert_eq!(
-        v.state,
-        VerificationState::Stale {
-            verified_artifact: first
-        },
-        "the new artifact must not be verified, and the old one must be named"
+        v.record_rebuild([2u8; 32], subject).unwrap_err(),
+        RegistryError::ArtifactMismatch
     );
-    assert!(!v.is_verified());
+    assert!(
+        v.is_verified(),
+        "a refused rebuild must not revoke a verification that was earned"
+    );
 }
 
 #[test]
-fn an_upgrade_drops_a_claim_that_was_about_the_old_artifact() {
-    let first = [1u8; 32];
-    let mut v = Verification::claim(claim_for(first, true)).unwrap();
-    v.on_artifact_changed([2u8; 32]);
-    assert_eq!(v.state, VerificationState::Unclaimed);
-    assert!(v.claim.is_none(), "a claim about a dead artifact is noise");
-}
+fn an_upgrade_is_a_different_entry_and_inherits_nothing() {
+    // Version binding is real, it just lives in the addressing rather than in a
+    // state transition: two builds are two keys, hence two entries, and the
+    // second starts where every entry starts.
+    let v1 = [1u8; 32];
+    let v2 = [2u8; 32];
+    assert_ne!(
+        entry_seed(&v1),
+        entry_seed(&v2),
+        "two artifacts must not share an entry address"
+    );
 
-#[test]
-fn an_upgrade_keeps_a_claim_that_already_names_the_new_artifact() {
-    // An author who claims the source of the build they are about to deploy
-    // should not have that claim erased by the deployment.
-    let next = [2u8; 32];
-    let mut v = Verification::claim(claim_for(next, true)).unwrap();
-    v.on_artifact_changed(next);
-    assert_eq!(v.state, VerificationState::Claimed);
-    assert!(v.claim.is_some());
+    let mut first = Verification::claim(claim_for(true)).unwrap();
+    first.record_rebuild(v1, v1).unwrap();
+    assert!(first.is_verified());
+
+    let second = Verification::unclaimed();
+    assert_eq!(second.state, VerificationState::Unclaimed);
+    assert!(
+        !second.is_verified(),
+        "a new build must not inherit the badge of the one it replaces"
+    );
 }
 
 #[test]
@@ -258,14 +249,14 @@ fn alloc_tag(i: usize) -> String {
 
 #[test]
 fn an_empty_toolchain_is_refused_because_a_build_needs_one_to_be_reproducible() {
-    let mut c = claim_for([1u8; 32], true);
+    let mut c = claim_for(true);
     c.build.toolchain = String::new();
     assert_eq!(Verification::claim(c).unwrap_err(), RegistryError::Empty);
 }
 
 #[test]
 fn a_claim_with_no_repository_is_refused() {
-    let mut c = claim_for([1u8; 32], true);
+    let mut c = claim_for(true);
     c.repository = String::new();
     assert_eq!(Verification::claim(c).unwrap_err(), RegistryError::Empty);
 }

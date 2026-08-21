@@ -161,9 +161,16 @@ So this registry records whether a rebuild ran with the network disabled, and a
 claim built with network access cannot reach Verified — it stops at
 Unreproducible. That is a different state, not a softer word for the same one.
 
-And verification is bound to one artifact. When a program is upgraded its entry
-becomes Stale, naming the artifact the verification was true of, rather than
-carrying a badge earned by code that is no longer running."
+Verification is bound to one artifact, which here costs no machinery: an entry
+is keyed by its ImageID, so an upgraded program is a different key and therefore
+a different entry, starting Unclaimed. There is no way to inherit a badge earned
+by code that is no longer running, and no Stale state to display, because the
+bytecode under an entry cannot be replaced.
+
+Two numbers, kept apart on purpose:
+  ProgramId         the RISC0 ImageID -- what a program is called by
+  deployment digest SHA256(len_le || bytes) -- what the deploy tx hashes to
+The second is not the first. This tool checks the second and says so."
         );
         return ExitCode::SUCCESS;
     }
