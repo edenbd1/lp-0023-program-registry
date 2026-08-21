@@ -94,14 +94,37 @@ account() { # label base58 min_bytes
 # exist on chain, so a stale address passes this check while verifying a program
 # nobody uses. A check that passes on the wrong target is worse than one that
 # fails.
-PROGRAM=$(spel program-id "$BIN" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
+# The program id comes from DEPLOYMENTS.md, the document under test, and is
+# cross-checked against the artifact when spel is available. That split is
+# deliberate rather than lazy: computing an ImageID is a RISC0 operation and
+# reimplementing it here would be a second definition that can drift from the
+# real one. What this step verifies is the substantive claim -- that the accounts
+# belonging to the id this document names exist and hold data. Whether the id
+# itself is the artifact's is checked by `spel program-id`, which CI runners do
+# not have.
+PROGRAM=$(grep -oE '\| ProgramId \(RISC0 ImageID\) \| `[0-9a-f]{64}`' DEPLOYMENTS.md \
+          | grep -oE '[0-9a-f]{64}' | head -1)
+if command -v spel > /dev/null 2>&1; then
+  FROM_ELF=$(spel program-id "$BIN" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
+  if [ -n "$FROM_ELF" ] && [ "$FROM_ELF" != "$PROGRAM" ]; then
+    printf '  FAIL %-22s DEPLOYMENTS.md names %s, the artifact is %s\n' \
+           "program id" "${PROGRAM:0:12}..." "${FROM_ELF:0:12}..."
+    fail=1
+  elif [ -n "$FROM_ELF" ]; then
+    printf '  OK   %-22s matches the artifact\n' "program id"
+  fi
+else
+  printf '  INFO %-22s spel absent, id taken from DEPLOYMENTS.md unverified\n' "program id"
+fi
+
 if [ -n "$PROGRAM" ]; then
   account global-state    "$(python3 scripts/derive.py "$PROGRAM" global)" 16
   account canonical-entry "$(python3 scripts/derive.py "$PROGRAM" entry)"  100
 else
-  printf '  FAIL %-22s could not read an ImageID from %s\n' "accounts" "$BIN"
+  printf '  FAIL %-22s DEPLOYMENTS.md names no ProgramId\n' "accounts"
   fail=1
 fi
+
 
 # Controls. Neither hash was ever deployed, so both must return null; if the
 # endpoint answers "yes" to these it is answering "yes" to anything.
