@@ -34,7 +34,9 @@ check() { # label tx expect_present
 }
 
 echo "registry on $RPC"
-check deploy         c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d yes
+check deploy         10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26 yes
+check build-17474    c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d yes
+check build-17531    d986fefad93efe52229fc9955de231fe980864ba1749a826209b082e26690e13 yes
 check claim-source   222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0 yes
 check record-rebuild 5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4 yes
 check refusal-17428  a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca yes
@@ -57,7 +59,7 @@ b=open(sys.argv[1],'rb').read()
 print(hashlib.sha256(struct.pack('<I',len(b))+b).hexdigest())
 PY
 )
-  if [ "$got" = c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d ]; then
+  if [ "$got" = 10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26 ]; then
     printf '  OK   %-22s recomputes to the deploy transaction hash\n' "digest"
   else
     printf '  FAIL %-22s got %s\n' "digest" "$got"
@@ -83,8 +85,8 @@ account() { # label base58 min_bytes
     fail=1
   fi
 }
-account global-state    J4xUGTSXifofxBtsJHvyfbiNUT5FECwhY2SNkx97AaQT 16
-account canonical-entry 7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK 100
+account global-state    CoXDXzQcbtw1mnLwXPcGrw29afBDxkAHPh48ZPkscvBj 16
+account canonical-entry BJp44fYg2Aaypd68fLQcRAsLhdjY379FN3BFQGfDMJ4n 100
 
 # Controls. Neither hash was ever deployed, so both must return null; if the
 # endpoint answers "yes" to these it is answering "yes" to anything.

@@ -8,84 +8,43 @@ Built **sealed** — every build container had its network disabled.
 
 | | |
 |---|---|
-| ProgramId (RISC0 ImageID) | `e1484f1447edd7669d1443154841160f4ddfe4c5d93d410527e5cf99ab9aacba` |
-| deployment digest | `c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d` |
-| deploy transaction | [`c1223c72…adac2a9d`](https://explorer.testnet.lez.logos.co/transaction/c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d) · block 17474 |
-| `claim_source` | [`222a7c1b…161fcbc0`](https://explorer.testnet.lez.logos.co/transaction/222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0) |
-| `record_rebuild` | [`5823f762…f3c966e4`](https://explorer.testnet.lez.logos.co/transaction/5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4) |
-| global state | `J4xUGTSXifofxBtsJHvyfbiNUT5FECwhY2SNkx97AaQT` |
-| canonical entry | `7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK` |
+| ProgramId (RISC0 ImageID) | `28cb7f6e89e6a750f7f182a927d06d7984728a4843806df0dd862f3581af4710` |
+| deployment digest | `10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26` |
+| deploy transaction | [`10d172fd…607baa26`](https://explorer.testnet.lez.logos.co/transaction/10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26) · block 17553 |
+| global state | `CoXDXzQcbtw1mnLwXPcGrw29afBDxkAHPh48ZPkscvBj` |
+| canonical entry (itself) | `BJp44fYg2Aaypd68fLQcRAsLhdjY379FN3BFQGfDMJ4n` |
 
-### What it holds
+### All five verification states, live, and each one true
 
-| slot | name | state |
-|---|---|---|
-| 0 | `lez-program-registry` | **verified**, self-attested |
-| 1 | `antumbra-curve` | unclaimed |
-| 2 | `antumbra-lbp` | unclaimed |
-| 3 | `antumbra-vesting` | unclaimed |
+Reproduce the whole set with
+`REGISTRY=28cb7f6e89e6a750f7f182a927d06d7984728a4843806df0dd862f3581af4710 ./scripts/populate-demo.sh`.
 
-`total_entries` 4, `total_verified` 1. The three Antumbra programs are
-registered as the prize requires and left `Unclaimed` rather than dressed up:
-their binaries were built with the network available, so there is nothing
-truthful to claim about them yet.
+| slot | name | state | why it is that state |
+|---|---|---|---|
+| 0 | `lez-program-registry` | **verified**, self-attested | sealed rebuild reproduced the deployed ImageID |
+| 1 | `antumbra-curve` | **unclaimed** | nobody has said where its source is |
+| 2 | `antumbra-lbp` | **unreproducible** | the claim honestly records a build that had network access |
+| 3 | `antumbra-vesting` | **claimed** | a source is asserted and nobody has rebuilt it |
+| 4 | `lez-clock` | **unclaimed** | the LEZ clock program this registry reads its timestamps from |
+| 5 | `registry (stale source claim)` | **mismatched** | a third-party entry naming commit `8dfa2f01`, which really builds `e1484f14…` and not this program |
 
-`initialize`, `register` and `claim_source` also ran. Their transaction hashes are
-not the evidence and are not quoted: **the account contents are**. A hash proves a
-transaction was included, not that it did what you think — the two are different
-claims, and this project has been bitten by the difference twice. Read the state.
+Nothing there is staged. The mismatched entry points at a real earlier commit of
+this repository that genuinely produces a different ImageID; the unreproducible
+one records a build that genuinely had the network up. A demo that faked either
+would be demonstrating the opposite of what this registry is for.
 
-## Verified, and still not a tick
+Slot 5 is also why enumeration stores the entry seed rather than the program id:
+a walker deriving from the program id alone resolves every third-party entry to
+the canonical one and drops it from the listing — found by reading the listing
+back, not by reading the code.
 
-```
-$ lez-registry explain-entry "$(spel inspect 7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK --type EntryAccount ...)"
-lez-program-registry 0.5.0
-  program id   e1484f1447edd7669d1443154841160f4ddfe4c5d93d410527e5cf99ab9aacba
-  author       bfd087578945b8a9434004c679e6225f1934f5ebf27b96fbec5a6ef2167b9e3c
-  publisher    canonical
-  verification verified — BY ITS OWN AUTHOR
-               The only party vouching for this build is the party
-               that shipped it. Useful, and not an independent check.
-  repository   https://github.com/edenbd1/lez-program-registry
-  toolchain    1.88.0
-  offline      true
-```
+### Timestamps come from the chain
 
-`offline true` is the fact that earns the state, and it was earned rather than
-asserted: `scripts/build-sealed.sh` disables the network for every build
-container, so `claim_source` could record `network_disabled=1` without lying.
-
-The registry's own entry does not get a green check, because the only party
-vouching for this build is the party that shipped it. That is worth something and
-it is not an independent rebuild, and a UI that rendered both identically would
-hide the one difference that matters.
-
-## The same mechanism refusing, at block 17428
-
-An earlier deployment shows the other half, and it is worth keeping:
-
-```
-$ lez-registry explain-entry "$(spel inspect 84NG6dyqNiARW9K1LvK1cE9CZWYNWj9H179yWLNihB1q --type EntryAccount ...)"
-lez-program-registry 0.4.0
-  program id   145c111d0e8195f83483c10130221397fc11ef629efc89dbb414bcc9ee3cc8fd
-  author       bfd087578945b8a9434004c679e6225f1934f5ebf27b96fbec5a6ef2167b9e3c
-  publisher    canonical
-  verification unreproducible
-               A rebuild was recorded but the claimed build had network
-               access, so a match would prove nothing about the source.
-               attempted by bfd087578945b8a9434004c679e6225f1934f5ebf27b96fbec5a6ef2167b9e3c
-  repository   https://github.com/edenbd1/lez-program-registry
-  toolchain    1.88.0
-  offline      false
-```
-
-**The rebuild matched.** `record_rebuild` was called with exactly the deployed
-ImageID; the bytecode reproduced to the byte. The registry still refuses to call
-it verified, because the claimed build had network access, and a build that could
-have downloaded the artifact it was meant to reproduce proves nothing about the
-source. `total_verified` reads **0**, next to `total_entries` **1**.
-
-That zero is the deliverable. Any registry can print a tick.
+Entries carry `registered_at` and verdicts carry `last_checked`, both read from
+the sequencer's clock accounts rather than supplied by the caller. The Adoption
+criteria are counted in registrations per month and checked from chain data, so a
+caller-chosen date would be worse than none. See
+[docs/criteria-evidence.md](docs/criteria-evidence.md).
 
 ## How the sealed build works, and what it cost to get there
 
