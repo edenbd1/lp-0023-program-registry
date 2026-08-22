@@ -223,6 +223,22 @@ def unloadable_reason(plugin: Path):
     return None
 
 
+def qml_resource_root(variant_dir):
+    """The qrc root the shipped binary loads its QML from.
+
+    Read from the artifact, not the source: the source is not what ships. Qt
+    stores QString literals as UTF-16, so a plain `strings` finds nothing and the
+    scan looks for the encoded form.
+    """
+    pat = re.compile(rb"(?:q\x00r\x00c\x00:\x00)((?:[a-z_0-9/]\x00)+)"
+                     rb"M\x00a\x00i\x00n\x00\.\x00q\x00m\x00l\x00")
+    for lib in list(variant_dir.rglob("*.dylib")) + list(variant_dir.rglob("*.so")):
+        hits = {m.group(1).decode("utf-16-le") for m in pat.finditer(lib.read_bytes())}
+        if hits:
+            return sorted(hits)[0]
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="app/lp-0023-program-registry.lgx")
@@ -262,6 +278,26 @@ def main() -> int:
             if bad:
                 print("\nthe package contents do not match its manifest", file=sys.stderr)
                 return 1
+            # Qt's resource system is process-global, so two modules that both
+            # register /qml/Main.qml resolve to whichever registered first and one
+            # tile draws the other's UI. It is invisible with a single module
+            # installed, which is why it survived until someone had two. The root
+            # must be the module's own name, and this refuses to ship a package
+            # where it is not.
+            for v in sorted(variants.iterdir()):
+                if not v.is_dir():
+                    continue
+                root = qml_resource_root(v)
+                if root is None:
+                    continue
+                if root.strip("/") in ("qml", ""):
+                    print(f"\n{args.verify}: variant {v.name} loads its QML from "
+                          f"{root!r}, which every module would claim — set PREFIX in "
+                          "qt_add_resources and the setSource() URL to this module's "
+                          "own name", file=sys.stderr)
+                    return 1
+                print(f"  ok   variants/{v.name} qml root {root}")
+
             print(f"\n{args.verify}: contents match the manifest "
                   f"({len(per)} variant{'s' if len(per) != 1 else ''}: "
                   f"{', '.join(sorted(per))}; sha256 {sha(pkg.read_bytes())[:16]}…)")
