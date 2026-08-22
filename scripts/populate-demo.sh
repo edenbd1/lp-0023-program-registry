@@ -22,8 +22,12 @@ BUILDER_DIGEST=3e12f71bacd27527a61dea96fa0e53e468c99aa261d3a1019b593f6dbd943eb3
 command -v spel > /dev/null || { echo "spel not on PATH" >&2; exit 1; }
 [ -x "$CLI" ] || { echo "build the CLI first: cargo build --release --manifest-path cli/Cargo.toml" >&2; exit 1; }
 
-seed()     { "$CLI" entry-address "$1" | head -1 | tr -d ' '; }
-tp_seed()  { "$CLI" entry-address "$1" --publisher "$2" | head -1 | tr -d ' '; }
+# The seed, not the account address: `spel --entry-seed` takes the seed and
+# derives the address itself. These parsed line 1 back when line 1 was the seed;
+# it is now the account, which is the more useful thing to lead with and would
+# have silently sent every registration to an address the program refuses.
+seed()     { "$CLI" entry-address "$1" | sed -n 's/^ *seed *//p'; }
+tp_seed()  { "$CLI" entry-address "$1" --publisher "$2" | sed -n 's/^ *seed *//p'; }
 seq_seed() { python3 -c "import hashlib,struct;print(hashlib.sha256(b'lez-registry:seq:v1'+struct.pack('<Q',$1)).hexdigest())"; }
 run()      { spel --idl "$IDL" --program "$REGISTRY" -- "$@" 2>&1 | grep -qE '✅'; }
 

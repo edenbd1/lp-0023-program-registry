@@ -10,6 +10,96 @@ tool that answers the last one *honestly*.
 > **Status: early.** The core types and verification logic are here and tested.
 > The SPEL program, CLI, SDK and Basecamp app follow.
 
+## Live on the public LEZ testnet
+
+| | |
+|---|---|
+| ProgramId | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
+| deploy | `b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953`, block 17910 |
+| global state | `75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z` |
+| endpoint | `https://testnet.lez.logos.co` |
+
+Built **sealed** — the network is disabled for every build container, so the
+guest cannot fetch anything `Cargo.lock` did not already pin. That is what lets
+a rebuild mean something; see [`scripts/build-sealed.sh`](scripts/build-sealed.sh).
+
+It holds six entries covering all five verification states, and every one of
+them is true rather than staged. [`DEPLOYMENTS.md`](DEPLOYMENTS.md) lists them.
+
+## Try it
+
+```bash
+cargo build --release --manifest-path cli/Cargo.toml
+CLI=./cli/target/release/lez-registry
+
+# Resolve a program. One hash, one account read, no index — and none exists
+# to consult: LEZ has no account enumeration.
+$CLI lookup f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
+
+# Where that entry lives, computed without touching the network. Prints the
+# account to read, and the seed to hand to `spel --entry-seed`.
+$CLI entry-address f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
+
+# Browse. Linear, and openly so — this is what the optional indexer accelerates.
+$CLI search ""
+$CLI search mismatched
+
+# Check a local binary against what was deployed. The digest IS the deploy
+# transaction hash, so this needs no explorer to vouch for it.
+$CLI deployment-digest artifacts/programs/lez_registry.bin
+
+# What a verification state actually supports, in words.
+$CLI verify --explain
+```
+
+### Registering and verifying a program
+
+Writing to the registry is signed, so it goes through `spel` with a wallet:
+
+```bash
+export LEE_WALLET_HOME_DIR=~/.lez-wallet
+export REGISTRY=f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
+export CLOCK=4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU   # the sequencer's clock
+
+# 1. Build sealed and read the fields a claim needs.
+./scripts/build-sealed.sh
+./scripts/verify-source.sh          # refuses if your tree differs from HEAD
+
+# 2. Register, claim the source, record the rebuild.
+#    scripts/populate-demo.sh does all three and is the shortest way to see it.
+REGISTRY=$REGISTRY ./scripts/populate-demo.sh
+```
+
+`verify-source.sh` refuses outright when tracked sources differ from `HEAD`: a
+claim names a commit, and a commit that does not contain what was built is a
+claim that was false when it was written.
+
+### The Basecamp module
+
+[`app/`](app/README.md) — browse the registry, filter it, and see one entry in
+full. Build it, package it, and check it loads the way Basecamp does:
+
+```bash
+cd app
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/Qt/6.9.2/macos -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j4
+python3 ../scripts/package-lgx.py
+```
+
+Qt **6.9.2** specifically: Basecamp 0.2.2 bundles that version and the bundled
+version is a ceiling, so a plugin built against a newer Qt is rejected at load.
+
+### Check the whole document
+
+```bash
+./scripts/verify-onchain.sh
+```
+
+Re-checks every claim in `DEPLOYMENTS.md` against the live chain, derives the
+account addresses from the artifact rather than trusting the file, and carries
+two never-deployed hashes as controls — a `getTransaction` that answers "yes" to
+those is answering yes to anything.
+
 ## What "verified" means here, and what it does not
 
 Verification proves exactly one thing: **rebuilding the stated source, at the

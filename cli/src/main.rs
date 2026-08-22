@@ -123,8 +123,32 @@ fn main() -> ExitCode {
                 Some(p) => core_::third_party_entry_seed(&pid, &p),
                 None => core_::entry_seed(&pid),
             };
-            println!("{}", hex(&seed));
-            println!("  base58 {}", to_base58(&seed));
+            // The seed is not the address. It was printed as one here, under a
+            // heading that said "where the entry lives", and the base58 beside
+            // it was the base58 of the *seed* -- a well-formed account id that
+            // holds nothing. Found by running the commands the README documents.
+            //
+            // Both are printed because both are needed: the account to read, and
+            // the seed to pass to `spel --entry-seed`, which takes the seed and
+            // derives the address itself.
+            let registry = match args
+                .iter()
+                .position(|a| a == "--registry")
+                .and_then(|i| args.get(i + 1))
+                .map_or(Some(DEFAULT_REGISTRY.to_owned()), |s| Some(s.clone()))
+                .as_deref()
+                .and_then(from_hex)
+            {
+                Some(r) => r,
+                None => {
+                    eprintln!("--registry takes 64 hex characters");
+                    return ExitCode::FAILURE;
+                }
+            };
+            println!("{}", to_base58(&lez_registry_sdk::pda(&registry, &seed)));
+            println!("  the account to read");
+            println!("  seed   {}", hex(&seed));
+            println!("  pass the seed to `spel --entry-seed`, which derives the address itself");
             println!(
                 "  {}",
                 if publisher.is_some() {
