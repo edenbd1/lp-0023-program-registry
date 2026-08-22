@@ -57,3 +57,38 @@ slot for slot rather than approximating it.
 The packaged manifest carries `type: "ui"`. `lgx add` leaves that field empty and
 an empty type makes the module invisible in Basecamp, so `package-lgx.py` patches
 the metadata in afterwards.
+
+## Two things that only show up with the host actually running
+
+**A module that loads can still kill Basecamp.** `QPluginLoader::load()`
+returning true proves the binary is ABI-compatible and exports the interface. It
+proves nothing about using it. Clicking the tile killed the host with `SIGTRAP` —
+no dialog, no log line, the window simply gone:
+
+```
+libsystem_pthread.dylib  pthread_jit_write_protect_np
+libpcre2-16.0.dylib      sljit_malloc_exec / pcre2_jit_compile_16
+QtCore                   QRegularExpressionPrivate::compilePattern()
+QtNetwork                macQueryInternal(QNetworkProxyQuery const&)
+QtNetwork                QNetworkProxyFactory::systemProxyForQuery(...)
+```
+
+The first `QNetworkAccessManager` request triggers Qt's macOS system-proxy
+lookup, which builds a `QRegularExpression`, which asks PCRE2 to JIT-compile it.
+Basecamp runs under the hardened runtime *without*
+`com.apple.security.cs.allow-jit`, so the JIT allocation traps. A module cannot
+add an entitlement to somebody else's signed binary, so it declines the lookup
+instead — two lines in the bridge constructor, before any request:
+
+```cpp
+QNetworkProxyFactory::setUseSystemConfiguration(false);
+m_net.setProxy(QNetworkProxy::NoProxy);
+```
+
+**And two modules that both register `qrc:/qml/Main.qml` render each other.** Qt's
+resource system is process-global, so whichever registers first wins for both:
+with two of these installed, one tile showed the other module's UI over its own
+live data. The resource prefix is now this module's own name, which cannot
+collide. Verified with five modules installed at once, each opened in turn.
+
+Neither failure appears in a load test. Both appear on the first click.

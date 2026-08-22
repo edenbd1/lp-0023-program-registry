@@ -32,6 +32,10 @@ Item {
 
     property string status: "Loading the registry…"
     property bool   busy: false
+    // Where an incoming entry belongs. `busy` cannot answer that: a
+    // single lookup sets it too, and appending on it would push a
+    // looked-up entry into the listing.
+    property bool   walking: false
     property var    entry: null
     property string derived: ""
 
@@ -93,6 +97,7 @@ Item {
         }
         function onWalkDone(found) {
             root.busy = false
+            root.walking = false
             root.status = found + " entries read from " + bridge.endpoint()
         }
         function onEntryFound(name, version, description, author, publisher,
@@ -110,8 +115,18 @@ Item {
             }
             // A walk fills the list; a single lookup selects. The same signal
             // serves both because the entry is the same object either way.
-            if (root.busy) entries.append(rec)
-            else root.selected = rec
+            // Only a single lookup ends the reading state; a walk ends at
+            // walkDone. Clearing `busy` unconditionally below this line stopped
+            // the list after one entry — every later one took the else branch
+            // and replaced the detail panel instead of being appended, so the
+            // header said "6 registered" over a list of one.
+            if (root.walking) {
+                entries.append(rec)
+            } else {
+                root.selected = rec
+                root.busy = false
+                root.status = "Read from " + bridge.endpoint()
+            }
             root.entry = {
                 name: name, version: version, description: description,
                 author: author, publisher: publisher, verification: verification,
@@ -121,8 +136,6 @@ Item {
                 registeredBlock: registeredBlock, registeredMillis: registeredMillis,
                 lastCheckedBlock: lastCheckedBlock, idl: idl
             }
-            root.busy = false
-            root.status = "Read from " + bridge.endpoint()
         }
         function onEntryMissing(account) {
             root.entry = null
@@ -135,13 +148,14 @@ Item {
         }
         function onFailed(what) {
             root.busy = false
+            root.walking = false
             root.status = "Failed: " + what
         }
     }
 
     property var selected: null
 
-    Component.onCompleted: { root.busy = true; bridge.listEntries() }
+    Component.onCompleted: { root.busy = true; root.walking = true; bridge.listEntries() }
 
     Rectangle {
         anchors.fill: parent

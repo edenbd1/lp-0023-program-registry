@@ -47,7 +47,7 @@ if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
     )
 
     qt_add_resources(lez_program_registry_module_plugin "qml"
-        PREFIX "/qml"
+        PREFIX "/lez_program_registry"
         BASE "qml"
         FILES qml/Main.qml qml/qmldir
     )
@@ -75,7 +75,7 @@ else()
     )
 
     qt_add_resources(lez_program_registry_plugin "qml"
-        PREFIX "/qml"
+        PREFIX "/lez_program_registry"
         BASE "qml"
         FILES qml/Main.qml qml/qmldir
     )

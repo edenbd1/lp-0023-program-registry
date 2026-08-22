@@ -17,11 +17,15 @@ QWidget* RegistryPlugin::createWidget(LogosAPI* /*api*/) {
     // could sign would be a custody risk for no gain.
     m_bridge = new RegistryBridge(this);
 
+    // Qt's resource system is process-global: two modules that both
+    // register /qml/Main.qml resolve to whichever registered first, so a
+    // second Antumbra module rendered the first one's UI over its own
+    // data. The prefix is this module's name, which cannot collide.
     auto* view = new QQuickWidget();
     view->engine()->rootContext()->setContextProperty(
         QStringLiteral("bridge"), m_bridge);
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    view->setSource(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+    view->setSource(QUrl(QStringLiteral("qrc:/lez_program_registry/Main.qml")));
     return view;
 }
 

@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
@@ -178,7 +179,17 @@ const char* stateWord(quint8 tag) {
 }  // namespace
 
 RegistryBridge::RegistryBridge(QObject* parent)
-    : QObject(parent), m_rpc(QString::fromLatin1(kDefaultRpc)) {}
+    : QObject(parent), m_rpc(QString::fromLatin1(kDefaultRpc)) {
+    // Qt's macOS system-proxy lookup builds a QRegularExpression, PCRE2 tries to
+    // JIT-compile it, and pthread_jit_write_protect_np traps: Basecamp runs under
+    // the hardened runtime without com.apple.security.cs.allow-jit, so the first
+    // HTTP request took the whole host process down with SIGTRAP — no dialog, no
+    // log line. A module cannot add an entitlement to somebody else's signed
+    // binary, so it declines the lookup instead. Direct connection only, which is
+    // what talking to a sequencer over its public URL wants anyway.
+    QNetworkProxyFactory::setUseSystemConfiguration(false);
+    m_net.setProxy(QNetworkProxy::NoProxy);
+}
 
 QString RegistryBridge::registryId() const {
     return QString::fromLatin1(kRegistryIdHex);
