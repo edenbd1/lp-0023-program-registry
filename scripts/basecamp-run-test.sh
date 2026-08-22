@@ -47,7 +47,10 @@ for spec in sys.argv[1:]:
 PY
 ) || { echo "could not read the packages"; exit 2; }
 printf '%s\n' "$roots" | while IFS=$'\t' read -r n r; do printf '   %-32s %s\n' "$n" "$r"; done
-dupes=$(printf '%s\n' "$roots" | cut -f2 | sort | uniq -d)
+# A package with no qrc QML at all reports "?", and two of those are not a
+# collision — they have nothing to collide over. Excluding them stops the
+# check inventing a failure for modules that never load QML from a resource.
+dupes=$(printf '%s\n' "$roots" | cut -f2 | grep -v '^?$' | sort | uniq -d)
 if [ -n "$dupes" ]; then
     echo "   FAIL two packages share a resource root: $dupes"
     echo "        set PREFIX in qt_add_resources and the setSource() URL to the module's own name"
