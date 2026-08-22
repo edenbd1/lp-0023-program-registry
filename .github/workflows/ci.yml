@@ -21,6 +21,12 @@ jobs:
           rustup default stable
       - name: Formatting
         run: cargo fmt --all -- --check
+      # Printed because CI's stable is often newer than a developer's, and a
+      # lint that exists there and not locally reads as a mystery failure. This
+      # turns it into a version number you can act on.
+      - name: Which clippy
+        run: cargo clippy --version
+
       - name: Clippy, warnings are errors
         run: cargo clippy --all-targets -- -D warnings
 
