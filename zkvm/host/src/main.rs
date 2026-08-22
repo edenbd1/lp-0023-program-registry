@@ -15,8 +15,14 @@ fn main() {
         .execute(env, LEZ_REGISTRY_GUEST_ELF)
         .expect("guest executes");
 
-    let (rows, baseline, whole_register): (Vec<Row>, u64, u64) =
-        info.journal.decode().expect("journal decodes");
+    let (rows, baseline, whole_register, whole_update, whole_claim, whole_takeover): (
+        Vec<Row>,
+        u64,
+        u64,
+        u64,
+        u64,
+        u64,
+    ) = info.journal.decode().expect("journal decodes");
 
     println!("guest image id : {LEZ_REGISTRY_GUEST_ID:?}");
     println!("total cycles   : {}", info.cycles());
@@ -26,9 +32,18 @@ fn main() {
     for (name, med, lo, hi, n) in &rows {
         println!("| `{name}` | {n} | {med} | {lo} | {hi} |");
     }
-    println!("\nwhole `register` body, derive to serialised bytes: {whole_register} cycles");
-    println!(
-        "LEZ public-execution cap: {LEZ_PUBLIC_EXECUTION_CAP} — that body uses {:.4}% of it",
-        whole_register as f64 * 100.0 / LEZ_PUBLIC_EXECUTION_CAP as f64
-    );
+    println!("\n| instruction body | cycles | share of the cap |");
+    println!("|---|---:|---:|");
+    for (name, n) in [
+        ("register", whole_register),
+        ("update", whole_update),
+        ("claim_source", whole_claim),
+        ("claim_canonical", whole_takeover),
+    ] {
+        println!(
+            "| `{name}` | {n} | {:.4}% |",
+            n as f64 * 100.0 / LEZ_PUBLIC_EXECUTION_CAP as f64
+        );
+    }
+    println!("\nLEZ public-execution cap: {LEZ_PUBLIC_EXECUTION_CAP}");
 }

@@ -16,7 +16,7 @@ use risc0_zkvm::guest::env;
 
 use lez_registry_core::{
     deployment_digest, entry_seed, global_seed, seq_seed, third_party_entry_seed,
-    BuildEnvironment, Entry, Publisher, SourceClaim, Verification,
+    BuildEnvironment, Entry, Publisher, SourceClaim, Stamp, Verification,
 };
 
 /// One measured region. Returns net cycles for `f`.
@@ -32,6 +32,11 @@ fn stats(v: &[u64]) -> (u64, u64, u64) {
     s.sort_unstable();
     (s[s.len() / 2], s[0], s[s.len() - 1])
 }
+
+const STAMP_FIXTURE: Stamp = Stamp {
+    block: 17_910,
+    millis: 1_787_350_000_000,
+};
 
 fn sample_claim() -> SourceClaim {
     SourceClaim {
@@ -49,6 +54,7 @@ fn sample_claim() -> SourceClaim {
 fn sample_entry() -> Entry {
     let mut e = Entry::new(
         [0xe1; 32],
+        STAMP_FIXTURE,
         "lez-program-registry".into(),
         "0.5.0".into(),
         [0xbf; 32],
@@ -113,7 +119,12 @@ fn main() {
         .map(|_| {
             let mut ver = Verification::claim(sample_claim()).expect("valid");
             timed(baseline, || {
-                ver.record_rebuild(black_box(subject), black_box(subject), black_box(attester))
+                ver.record_rebuild(
+                    black_box(subject),
+                    black_box(subject),
+                    black_box(attester),
+                    STAMP_FIXTURE,
+                )
             })
         })
         .collect();
@@ -126,7 +137,12 @@ fn main() {
             c.build.network_disabled = false;
             let mut ver = Verification::claim(c).expect("valid");
             timed(baseline, || {
-                ver.record_rebuild(black_box(subject), black_box(subject), black_box(attester))
+                ver.record_rebuild(
+                    black_box(subject),
+                    black_box(subject),
+                    black_box(attester),
+                    STAMP_FIXTURE,
+                )
             })
         })
         .collect();
@@ -170,11 +186,37 @@ fn main() {
     let (m, lo, hi) = stats(&v);
     out.push(("deployment_digest 64KiB", m, lo, hi, v.len()));
 
+    // The instructions the criterion names, each as its whole body rather than
+    // as a sum of parts -- a sum omits the decode of what is already there, and
+    // for `update` that decode is most of the cost.
+    let e_stored = borsh::to_vec(&sample_entry()).expect("fixture serialises");
+    let whole_update = timed(baseline, || {
+        let mut e: Entry = Entry::try_from_slice(black_box(&e_stored)).expect("decodes");
+        e.version = "0.9.1".into();
+        e.description = "an updated description of about the same length".into();
+        let _ = e.validate();
+        borsh::to_vec(&e).expect("serialises").len()
+    });
+
+    let whole_claim = timed(baseline, || {
+        let mut e: Entry = Entry::try_from_slice(black_box(&e_stored)).expect("decodes");
+        e.verification = Verification::claim(black_box(sample_claim())).expect("valid");
+        borsh::to_vec(&e).expect("serialises").len()
+    });
+
+    let whole_takeover = timed(baseline, || {
+        let mut e: Entry = Entry::try_from_slice(black_box(&e_stored)).expect("decodes");
+        e.verification = Verification::claim(sample_claim()).expect("valid");
+        let _ = e.claim_canonical(black_box([0xCC; 32]), black_box(e.program_id), STAMP_FIXTURE);
+        borsh::to_vec(&e).expect("serialises").len()
+    });
+
     // What one `register` actually costs: derive, build, validate, store.
     let whole_register = timed(baseline, || {
         let seed = entry_seed(black_box(&subject));
         let mut e = Entry::new(
             black_box(subject),
+            STAMP_FIXTURE,
             "lez-program-registry".into(),
             "0.5.0".into(),
             author,
@@ -187,5 +229,12 @@ fn main() {
         (seed, bytes.len())
     });
 
-    env::commit(&(out, baseline, whole_register));
+    env::commit(&(
+        out,
+        baseline,
+        whole_register,
+        whole_update,
+        whole_claim,
+        whole_takeover,
+    ));
 }

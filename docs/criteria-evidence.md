@@ -50,7 +50,7 @@ than described as nearly done.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 24 | Document compute units for register and update | **partial** | [CYCLES.md](../CYCLES.md) measures the register body at 6,294 cycles; `update` is not separately measured |
+| 24 | Document compute units for register and update | **met** | [CYCLES.md](../CYCLES.md) measures all four instruction bodies whole: register 6,399, update 5,215, claim_source 6,166, claim_canonical 6,627 — none above 0.021% of the 32M cap |
 | 25 | Lookup latency, and search across a registry of **at least 500 entries** | **partial** | [LATENCY.md](../LATENCY.md) measures 500 live lookups; the registry holds 4 entries, and the gap is stated there rather than glossed |
 
 ## Supportability
