@@ -121,8 +121,8 @@ pub fn compute_private_pda(
     let pda_seed = PdaSeed::new(combined);
     // lez-core v0.2.2 binds a private PDA to both the nullifier public key and the
     // viewing public key (plus a u128 `identifier`, defaulted to 0 here). This
-    // helper is only reached by the macro's `private_pda` path, which this registry does
-    // not use — its accounts are public `pda = ...` PDAs.
+    // helper is only reached by the macro's `private_pda` path, which this
+    // registry does not use — its accounts are public `pda = ...` PDAs.
     AccountId::for_private_pda(program_id, &pda_seed, npk, vpk, 0)
 }
 

@@ -12,9 +12,9 @@ That is the canonical packager and it is always preferred.
 Only if none is found does this fall back to writing the package directly. The
 fallback is not guesswork: the manifest hash scheme is transcribed from
 `logos-package/src/crypto/signing.cpp`, and the transcription is checked against
-two packages built by the real tool before anything
-is written. Both paths were confirmed to produce **identical manifest hashes**
-for this module.
+a package built by the real tool — this module's own committed `.lgx` — before
+anything is written. Both paths were confirmed to produce **identical manifest
+hashes** for this module.
 
 Either way the metadata fields are patched in afterwards, which is what
 `nix-bundle-lgx`'s `bundle.sh` does too: `lgx add` leaves author, description,
@@ -112,14 +112,13 @@ def build_manifest(stage: Path, name: str, version: str, meta: dict, plugin: str
 
 def self_test() -> int:
     """Check the transcription against packages built by the real tool."""
-    refs = [
-        # Sibling packages only exist on the machine that built them, so from a
-        # clean clone the check would otherwise pass by having nothing to test.
-        # This module's own committed package was written by the real `lgx`
-        # too, and it ships in the repository — so there is always at least one
-        # real reference to reproduce.
-        ROOT / "app/lp-0023-program-registry.lgx",
-    ]
+    # This module's own committed package was written by the real `lgx` and
+    # ships in the repository, so a clean clone always has at least one real
+    # reference to reproduce. Point LGX_REF_PACKAGES (colon-separated paths) at
+    # more real-tool packages to widen the cross-check.
+    refs = [ROOT / "app/lp-0023-program-registry.lgx"]
+    refs += [ROOT / p if not p.startswith("/") else Path(p)
+             for p in os.environ.get("LGX_REF_PACKAGES", "").split(":") if p]
     found = [r for r in refs if r.is_file()]
     if not found:
         print("self-test: no reference .lgx to check against — refusing to "
