@@ -238,7 +238,11 @@ fn detail_href(e: &Entry) -> String {
     match e.publisher {
         Publisher::Canonical => format!("/program/{}", hex(&e.program_id)),
         Publisher::ThirdParty => {
-            format!("/program/{}?publisher={}", hex(&e.program_id), hex(&e.author))
+            format!(
+                "/program/{}?publisher={}",
+                hex(&e.program_id),
+                hex(&e.author)
+            )
         }
     }
 }
@@ -330,7 +334,10 @@ fn legend() -> String {
         let author: AccountId = [1u8; 32];
         let mut e = Entry::new(
             [0u8; 32],
-            Stamp { block: 0, millis: 0 },
+            Stamp {
+                block: 0,
+                millis: 0,
+            },
             "x".into(),
             "0".into(),
             author,
@@ -416,8 +423,8 @@ pub fn list_page(site: &Site, entries: &[Entry], global: Option<&GlobalState>) -
         .iter()
         .filter(|e| matches!(e.publisher, Publisher::Canonical))
         .count();
-    let (declared_total, declared_verified) =
-        global.map_or((entries.len() as u64, verified as u64), |g| {
+    let (declared_total, declared_verified) = global
+        .map_or((entries.len() as u64, verified as u64), |g| {
             (g.total_entries, g.total_verified)
         });
 
@@ -548,12 +555,7 @@ lez-registry idl <b>{cid}</b> --from ./storage-dir</pre>"#,
     }
 }
 
-pub fn detail_page(
-    site: &Site,
-    e: &Entry,
-    publisher: Option<&AccountId>,
-    idl: &IdlView,
-) -> String {
+pub fn detail_page(site: &Site, e: &Entry, publisher: Option<&AccountId>, idl: &IdlView) -> String {
     let f = state_face(e);
     let author_b58 = sdk::base58(&e.author);
 
@@ -586,7 +588,10 @@ pub fn detail_page(
         None => String::new(),
     };
     let last_checked_row = match &e.verification.last_checked {
-        Some(s) => format!(r#"<div><dt>Last checked</dt><dd>{}</dd></div>"#, esc(&stamp_line(s))),
+        Some(s) => format!(
+            r#"<div><dt>Last checked</dt><dd>{}</dd></div>"#,
+            esc(&stamp_line(s))
+        ),
         None => r#"<div><dt>Last checked</dt><dd class="faint">never</dd></div>"#.to_string(),
     };
 
@@ -626,8 +631,13 @@ pub fn detail_page(
             rebuild = rebuild_block(site, e),
         ),
         Some(c) => {
-            let repo_dd = if c.repository.starts_with("http://") || c.repository.starts_with("https://") {
-                format!(r#"<a href="{r}" rel="noopener noreferrer nofollow" target="_blank">{r}</a>"#, r = esc(&c.repository))
+            let repo_dd = if c.repository.starts_with("http://")
+                || c.repository.starts_with("https://")
+            {
+                format!(
+                    r#"<a href="{r}" rel="noopener noreferrer nofollow" target="_blank">{r}</a>"#,
+                    r = esc(&c.repository)
+                )
             } else {
                 esc(&c.repository)
             };
@@ -734,7 +744,12 @@ pub fn not_found(site: &Site, heading: &str, detail_html: &str) -> String {
         h = esc(heading),
         d = detail_html,
     );
-    page(site, &format!("{heading} · LEZ Registry Explorer"), "", &body)
+    page(
+        site,
+        &format!("{heading} · LEZ Registry Explorer"),
+        "",
+        &body,
+    )
 }
 
 #[cfg(test)]
@@ -754,7 +769,11 @@ mod tests {
             "zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55",
         ] {
             let bytes = core_::decode_content_id(cid).expect("known-good CID decodes");
-            assert_eq!(content_id_string(&bytes), cid, "re-encoding must reproduce {cid}");
+            assert_eq!(
+                content_id_string(&bytes),
+                cid,
+                "re-encoding must reproduce {cid}"
+            );
         }
     }
 
@@ -770,7 +789,10 @@ mod tests {
         let author: AccountId = [9u8; 32];
         let mut e = Entry::new(
             [3u8; 32],
-            Stamp { block: 1, millis: 0 },
+            Stamp {
+                block: 1,
+                millis: 0,
+            },
             "x".into(),
             "1".into(),
             author,
@@ -779,6 +801,9 @@ mod tests {
         .unwrap();
         e.publisher = Publisher::ThirdParty;
         let href = detail_href(&e);
-        assert!(href.contains("?publisher="), "third-party link must resolve back to itself, not the canonical entry");
+        assert!(
+            href.contains("?publisher="),
+            "third-party link must resolve back to itself, not the canonical entry"
+        );
     }
 }

@@ -148,12 +148,20 @@ fn main() -> std::process::ExitCode {
     println!("  endpoint  {}", app.cfg.endpoint);
     match &app.cfg.storage {
         Some(g) => println!("  storage   {g}"),
-        None => println!("  storage   (none) — IDLs show their content id; pass --storage-gateway to resolve"),
+        None => println!(
+            "  storage   (none) — IDLs show their content id; pass --storage-gateway to resolve"
+        ),
     }
-    println!("  cache     {}", match app.cfg.cache_ttl {
-        Some(d) => format!("{}s (in-memory, rebuilt from chain, never a source of truth)", d.as_secs()),
-        None => "off".to_string(),
-    });
+    println!(
+        "  cache     {}",
+        match app.cfg.cache_ttl {
+            Some(d) => format!(
+                "{}s (in-memory, rebuilt from chain, never a source of truth)",
+                d.as_secs()
+            ),
+            None => "off".to_string(),
+        }
+    );
     // Warm the cache so the first visitor is not the one who waits for the walk.
     match app.snapshot() {
         Ok((e, _)) => println!("  warmed    {} entries", e.len()),
@@ -182,7 +190,12 @@ fn handle(mut stream: TcpStream, app: &App) {
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("/");
     if method != "GET" {
-        respond(&mut stream, "405 Method Not Allowed", "text/plain; charset=utf-8", b"only GET");
+        respond(
+            &mut stream,
+            "405 Method Not Allowed",
+            "text/plain; charset=utf-8",
+            b"only GET",
+        );
         return;
     }
 
@@ -237,7 +250,12 @@ fn handle(mut stream: TcpStream, app: &App) {
     if path == "/api/programs.json" {
         match app.snapshot() {
             Ok((entries, global)) => {
-                respond(&mut stream, "200 OK", "application/json; charset=utf-8", programs_json(app, &entries, global.as_ref()).as_bytes());
+                respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    programs_json(app, &entries, global.as_ref()).as_bytes(),
+                );
             }
             Err(e) => respond(
                 &mut stream,
@@ -270,7 +288,11 @@ fn serve_detail(stream: &mut TcpStream, app: &App, site: &Site, rest: &str, quer
         respond_html(
             stream,
             "400 Bad Request",
-            &render::not_found(site, "Not a program id", "A program id is 64 hex characters — the RISC0 ImageID a program is called by."),
+            &render::not_found(
+                site,
+                "Not a program id",
+                "A program id is 64 hex characters — the RISC0 ImageID a program is called by.",
+            ),
         );
         return;
     };
@@ -323,7 +345,10 @@ fn resolve_idl(app: &App, e: &Entry) -> IdlView {
     };
     let cid = render::content_id_string(&cid_bytes);
     let Some(gateway) = &app.cfg.storage else {
-        return IdlView::Present { cid, resolved: None };
+        return IdlView::Present {
+            cid,
+            resolved: None,
+        };
     };
     let url = format!("{}/{}", gateway.trim_end_matches('/'), cid);
     let agent = ureq::AgentBuilder::new()
@@ -554,7 +579,9 @@ fn json_str(s: &str) -> String {
 
 /// Plain-text escape for interpolating an untrusted string into a notice's HTML.
 fn esc_txt(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) {
