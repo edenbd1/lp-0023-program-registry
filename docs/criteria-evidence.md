@@ -1,8 +1,9 @@
 # LP-0023 criteria, and where this submission actually stands
 
 The prize text is [PR #127](https://github.com/logos-co/lambda-prize/pull/127) on
-`logos-co/lambda-prize` (`prizes/LP-0023.md`, status **Draft**). It is not yet
-merged, so the criteria below are quoted from that PR and may still change.
+`logos-co/lambda-prize` (`prizes/LP-0023.md`, now **open (non-draft) and
+mergeable**, still on the PR branch rather than `master`). Criteria are quoted
+from that PR — re-read it before submitting, since an open PR can still change.
 
 Status is one of **met**, **partial**, or **open**. Nothing is marked met that
 has not been run; where a criterion is partial, what is missing is named rather
@@ -23,7 +24,7 @@ than described as nearly done.
 | 9 | Source verification reporting **four distinct states** | **met** | `Verified`, `Mismatched`, `Unclaimed`, `Claimed` — plus a fifth, `Unreproducible`, for a rebuild whose claimed build had network access |
 | 10 | A hash match alone is not proof; state how the build-script attack is addressed | **met** | sealed builds plus a named attester; [README](../README.md) |
 | 11 | Version-bound verification; document the staleness window; expose the last-verified point | **met** | `last_checked` is stored and displayed; the staleness argument is in [design-positions.md](design-positions.md) |
-| 12 | Operates end-to-end against Logos testnet 0.3 | **partial** | live on the public LEZ testnet; the "0.3" label has not been confirmed against this endpoint |
+| 12 | Operates end-to-end against Logos testnet 0.3 | **met** | the prize defines testnet 0.3 as "the canonical Logos LEZ zone", and there is one such public zone: `https://testnet.lez.logos.co`. The registry is deployed and operates end-to-end against it — `scripts/demo.sh` and `scripts/e2e-local-sequencer.sh` exercise register/deploy/resolve/verify, and the live global account resolves now (non-zero `total_entries`). The endpoint exposes no version RPC, so this rests on it being the single canonical public zone the prize targets (the prize contrasts 0.3 with a future v0.4), not on a version string read back |
 
 ## Usability
 
@@ -50,14 +51,14 @@ than described as nearly done.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 24 | Document compute units for register and update | **met** | [CYCLES.md](../CYCLES.md) measures all four instruction bodies whole: register 6,399, update 5,215, claim_source 6,166, claim_canonical 6,627 — none above 0.021% of the 32M cap |
+| 24 | Document **cycle count** for register and update (LEZ `cycle_bench` terminology, not a compute-unit or gas analogy) | **met** | [CYCLES.md](../CYCLES.md) reports RISC0 executor cycle counts — the same executor-cycle measure LEZ's own `cycle_bench` uses — for all four instruction bodies whole: register 6,399, update 5,215, claim_source 6,166, claim_canonical 6,627 cycles, none above 0.021% of the 32M-cycle public-execution cap |
 | 25 | Lookup latency, and search across a registry of **at least 500 entries** | **met** | [`scripts/populate-and-measure-500.sh`](../scripts/populate-and-measure-500.sh) registers **500 distinct entries** on a local standalone `sequencer_service` (`RISC0_DEV_MODE=0`, the criterion-33 harness) and measures over all 500 through the SDK `Client` the explorer uses. The count is read straight off the global account first (`total_entries: 500`). Lookup stays one hash + one read and is size-independent at scale — hit p50 222µs vs miss p50 212µs, a 10µs gap with 500 entries on chain; a full `walk` enumeration of all 500 is ~240 ms mean (1001 sequential reads); search is that walk plus a ~40µs in-memory filter (500 / 1 / 100 hits for three needles). Local because standing up 500 *entries* on the public testnet is ~a day of block time, whereas the earlier public run measured 500 *lookups* — both are in [LATENCY.md](../LATENCY.md), and the walk's per-read cost is why it lives in the cached indexer, not the resolve path |
 
 ## Supportability
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 26 | Deployed and tested on testnet 0.3, program ID in the README | **partial** | program ID published; testnet label unconfirmed |
+| 26 | Deployed and tested on testnet 0.3, program ID in the README | **met** | deployed to the canonical public Logos LEZ zone (`testnet.lez.logos.co`, what the prize calls testnet 0.3) and tested against it end to end; the deployed program ID, deploy transaction, global-state account and endpoint are in the README table. Same canonical-zone identification as #12 |
 | 27 | Builds and runs end-to-end on macOS (Apple Silicon) **and** Linux (x86_64), demo unmodified from a clean clone | **met** | `scripts/demo.sh` runs unmodified end to end on both: on macOS (Apple Silicon) natively, and on Linux x86_64 in a `--platform linux/amd64 rust:1-slim` container from a clean copy — build `cli`+`sdk`, then `demo.sh`, which walks the live registry, decodes the entry, checks the counters and re-verifies every claim in `DEPLOYMENTS.md` (`all checks passed`, exit 0) on both. The CI `demo` job re-runs it on an `ubuntu-latest`/`macos-latest` matrix once Actions is unblocked; this is the same run done locally in the meantime |
 | 28 | Basecamp module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/CMakeLists.txt` takes that path when `LOGOS_MODULE_BUILDER_ROOT` is set; the shipped `.lgx` was packaged with `lgx` from `logos-package` |
 | 29 | IDL generated via SPEL; **the registry registered in itself** | **met** | `idl/`, and entry 0 is the registry |
