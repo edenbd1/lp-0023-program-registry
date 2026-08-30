@@ -260,7 +260,11 @@ void RegistryBridge::refreshCounters() {
 
 void RegistryBridge::emitEntry(const QByteArray& payload, const QString& addr) {
     Reader r{payload};
-    r.skip(32);  // program_id, already known
+    // program_id: the program's RISC0 ImageID — its identity on a
+    // content-addressed chain, and the seed every entry address is derived from.
+    // Surfaced (as hex) so the detail view can show what the account was derived
+    // from rather than only the account itself.
+    const QString programId = QString::fromLatin1(r.bytes(32).toHex());
     // registered_at: Stamp { block: u64, millis: u64 }, read from the
     // sequencer's clock at registration rather than supplied by the
     // registrant.
@@ -287,11 +291,13 @@ void RegistryBridge::emitEntry(const QByteArray& payload, const QString& addr) {
     }
 
     const quint8 stateTag = r.u8();
-    QString repository, toolchain;
+    QString repository, toolchain, commit;
     bool offline = false;
     if (r.u8() == 1) {  // claim: Option<SourceClaim>
         repository = r.str();
-        r.skip(20);      // commit
+        // commit: [u8; 20], a git object id. Surfaced (as hex) so a reader can
+        // pin the exact revision the claim was built from, not only the repo.
+        commit = QString::fromLatin1(r.bytes(20).toHex());
         r.skip(32);      // source_digest
         r.skip(32);      // build.image_digest
         toolchain = r.str();
@@ -322,7 +328,7 @@ void RegistryBridge::emitEntry(const QByteArray& payload, const QString& addr) {
             QString::fromLatin1(stateWord(stateTag)), selfAttested,
                     frozen, repository, toolchain, offline, attester, addr,
                     QString::number(regBlock), QString::number(regMillis),
-                    QString::number(checkedBlock), idl);
+                    QString::number(checkedBlock), idl, commit, programId);
 }
 
 void RegistryBridge::lookup(const QString& programIdHex) {

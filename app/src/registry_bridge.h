@@ -62,7 +62,8 @@ signals:
                     const QString& toolchain, bool offlineBuild,
                     const QString& attester, const QString& account,
                     const QString& registeredBlock, const QString& registeredMillis,
-                    const QString& lastCheckedBlock, const QString& idl);
+                    const QString& lastCheckedBlock, const QString& idl,
+                    const QString& commit, const QString& programId);
     void entryMissing(const QString& account);
     void countersUpdated(const QString& total, const QString& verified);
     void walkProgress(int done, int total);
