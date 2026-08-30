@@ -107,6 +107,10 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
+  /* Nothing but the table's own .table-scroll is meant to move sideways, so the
+     page itself never should. `clip` (not `hidden`) keeps the sticky header
+     working and leaves the table's internal horizontal scroll untouched. */
+  overflow-x: clip;
   font-family: var(--font-sans);
   color: var(--text);
   background-color: var(--bg);
@@ -291,7 +295,7 @@ button.copy:hover { color: var(--brand); border-color: var(--brand); }
   background: var(--surface);
   box-shadow: var(--shadow);
 }
-.table-scroll { overflow-x: auto; }
+.table-scroll { overflow-x: auto; max-width: 100%; }
 table.registry { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 table.registry thead th {
   text-align: left;
@@ -377,7 +381,7 @@ table.registry tbody tr:hover { background: var(--surface-2); }
 .detail-sub { color: var(--text-dim); margin: 2px 0 22px; max-width: 72ch; }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
-@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
 
 .panel {
   border: 1px solid var(--border);
@@ -400,7 +404,11 @@ table.registry tbody tr:hover { background: var(--surface-2); }
 .panel .body { padding: 14px 16px; }
 .panel + .panel { margin-top: 22px; }
 
-dl.kv { margin: 0; display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 0; }
+/* The value track is minmax(0, 1fr), not 1fr: a 64-hex id has no spaces, so a
+   plain 1fr (= minmax(auto, 1fr)) would size the track to that id's min-content
+   — ~460px — and drag the whole page wider than a phone. minmax(0, …) lets the
+   track shrink and the dd's word-break wrap the id instead. */
+dl.kv { margin: 0; display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr); gap: 0; }
 dl.kv > div { display: contents; }
 dl.kv dt {
   padding: 8px 0;
@@ -592,4 +600,56 @@ footer.site-footer .self-verify { flex-basis: 100%; color: var(--text-faint); bo
 @media (prefers-reduced-motion: reduce) {
   main { animation: none; }
   * { transition: none !important; }
+}
+
+/* ---------- Small screens: a shared link opens on a phone ---------- */
+/* A 64-hex program id is the one thing that can push a narrow page sideways —
+   it has no spaces to wrap at. Let every monospace id break anywhere so no
+   block outruns the viewport and drags the rest of the page off-screen. */
+.mono,
+.cell-id a,
+.cell-author,
+.provenance .kv .v,
+dl.kv .v,
+.entry-id,
+.derivation {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 14px; }
+
+  /* The header stacks: brand on its own line, the search full width beneath it,
+     the About link and theme toggle on the row after. */
+  .site-header .wrap { gap: 10px 12px; padding-top: 10px; padding-bottom: 10px; }
+  .brand { flex: 1 1 auto; }
+  .brand .sub { display: none; }
+  .header-search { order: 3; flex: 1 1 100%; min-width: 0; }
+
+  /* Provenance is supporting text at this width; let it breathe and wrap. Flex
+     children must be allowed to shrink (min-width:0) or a long value keeps the
+     row — and with it the page — wider than the screen. */
+  .provenance .wrap { font-size: 0.72rem; gap: 4px 14px; }
+  .site-header .wrap > *, .provenance .wrap > * { min-width: 0; }
+  .provenance .claim, .provenance .kv { flex: 1 1 100%; }
+  .provenance .kv .v { overflow-wrap: anywhere; }
+
+  /* Two compact tiles read; four never fit. */
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat { padding: 12px 13px; }
+  .stat .n { font-size: 1.3rem; }
+
+  main { padding: 22px 0 56px; }
+  .page-title { font-size: 1.35rem; }
+  .detail-head h1, .detail-title { font-size: 1.35rem; }
+
+  /* The table keeps its own horizontal scroll (.table-scroll); just tighten it
+     so more of it is visible before a swipe is needed. */
+  table.registry { font-size: 0.82rem; }
+  table.registry thead th,
+  table.registry tbody td { padding: 10px 11px; }
+
+  /* Stack the state legend and any two-up key/value grids. */
+  .legend-grid { grid-template-columns: 1fr; }
 }
