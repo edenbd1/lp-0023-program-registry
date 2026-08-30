@@ -11,8 +11,12 @@ env:
 
 jobs:
   core:
-    name: Core types, verification logic and lints
-    runs-on: ubuntu-latest
+    name: Build, lint and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -49,7 +53,7 @@ jobs:
       # while the README pointed at four crates would be worse than no tick.
       - name: The other crates, same standard
         run: |
-          for crate in cli sdk indexer; do
+          for crate in cli sdk indexer explorer; do
             echo "::group::$crate"
             cargo fmt --manifest-path "$crate/Cargo.toml" -- --check
             cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets -- -D warnings
@@ -95,3 +99,20 @@ jobs:
 
       - name: Re-check every claim in DEPLOYMENTS.md
         run: ./scripts/verify-onchain.sh
+
+  # Criterion 27: the demo runs, unmodified, from a clean clone on both macOS and
+  # Linux. It is read-only against the public testnet, so it doubles as a
+  # cross-platform smoke test of the CLI the demo drives.
+  demo:
+    name: Demo runs from a clean clone (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Demo, unmodified
+        run: ./scripts/demo.sh
