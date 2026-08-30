@@ -9,9 +9,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-REGISTRY=e1484f1447edd7669d1443154841160f4ddfe4c5d93d410527e5cf99ab9aacba
-ENTRY_ACCOUNT=7XJmqUmu7YxeDZUKUbmJwRSFdRJPGxg23HHKgd1fCCBK
-GLOBAL_ACCOUNT=J4xUGTSXifofxBtsJHvyfbiNUT5FECwhY2SNkx97AaQT
+REGISTRY=f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
+ENTRY_ACCOUNT=wkLxSjsYNRq24FKPzDSh1haT382zwMU5QFb2YuHRD4h
+GLOBAL_ACCOUNT=75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z
 RPC="${SEQUENCER_URL:-https://testnet.lez.logos.co}"
 
 sha256() {
@@ -56,10 +56,8 @@ print("   first 32 bytes:", data[:32].hex())
 
 step "3. What the entry says, decoded"
 if [ -x cli/target/release/lez-registry ]; then
-  HEX=$(curl -s -m 25 -X POST "$RPC" -H 'Content-Type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccount\",\"params\":[\"$ENTRY_ACCOUNT\"]}" \
-    | python3 -c 'import sys,json;d=json.load(sys.stdin)["result"]["data"];print(bytes(d)[4:].hex())')
-  cli/target/release/lez-registry explain-entry "$HEX" | sed 's/^/   /'
+  cli/target/release/lez-registry lookup "$REGISTRY" \
+    --registry "$REGISTRY" --endpoint "$RPC" | sed 's/^/   /'
 else
   echo "   build the CLI first: cargo build --release --manifest-path cli/Cargo.toml"
 fi
@@ -80,9 +78,11 @@ if [ -f artifacts/programs/lez_registry.bin ]; then
   python3 - artifacts/programs/lez_registry.bin <<'PY'
 import hashlib, struct, sys
 b = open(sys.argv[1], 'rb').read()
-print('   deployment digest  :', hashlib.sha256(struct.pack('<I', len(b)) + b).hexdigest())
-print('   deploy transaction : c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d')
-print('   the digest IS the transaction hash — computed here, not read from an explorer')
+digest = hashlib.sha256(struct.pack('<I', len(b)) + b).hexdigest()
+print('   deployment digest  :', digest)
+print('   this same value is the deploy transaction hash on chain: the digest IS the')
+print('   tx id, computed here from the bytes rather than read from an explorer. Step 6')
+print('   proves getTransaction returns it, and a never-deployed hash returns null.')
 PY
 else
   echo "   artifacts/programs/lez_registry.bin not present"
