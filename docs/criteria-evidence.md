@@ -64,7 +64,7 @@ than described as nearly done.
 | 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **met** | `sdk/tests/e2e.rs` reads the live registry and asserts on what comes back: the registry is registered in itself, the derivation still agrees with the runtime, the counters match what the walk finds, all four verification states are present on chain, and an unregistered program resolves to nothing rather than erroring. Run as a required CI job, not skipped |
 | 31 | README documents setup, the deployed program ID, and step-by-step usage via CLI and Basecamp app | **met** | the deployed id, deploy transaction, global-state account and endpoint are in a table at the top; runnable CLI commands for resolve, derive, browse and digest; the signed path through `spel` and `populate-demo.sh`; the Basecamp build with the Qt 6.9.2 ceiling stated |
 | 32 | SDK documentation with a worked resolve example | **met** | `sdk/examples/resolve.rs` — the path a wallet or explorer takes, in about twenty lines: derive the address, read the entry, and branch on the verification state including the self-attested case. Runs against the live chain |
-| 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **partial** | `demo.sh` runs read-only against the public testnet |
+| 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **met** | `scripts/e2e-local-sequencer.sh`: one command from a clean clone stands up a real `sequencer_service` in standalone mode on a throwaway local port, funds the genesis signer, **deploys this registry's own sealed guest to that local chain**, initialises it, **registers the canonical entry** — built in process by the CLI (deriving the same `wkLxSjs…` address the public testnet holds), then signed and submitted through the wallet-backed `spel` — and reads it back, asserting the deployed program's ImageID, the deploy digest as a local transaction, the entry contents, `total_entries`, and two never-deployed controls returning null. `RISC0_DEV_MODE=0` is exported for every process, so no dev-mode skip path is taken anywhere. Local-only, not CI: it needs a LEZ checkout the runners do not have (criterion 30's CI e2e is the read-only `sdk/tests/e2e.rs`). What `RISC0_DEV_MODE=0` does and does not buy for an all-public program is stated below rather than glossed |
 
 ## Adoption
 
@@ -141,3 +141,34 @@ serde does not implement its traits for arrays past 32, which is why the
 instruction takes a string rather than bytes. Splitting a 38-byte identifier
 across two array arguments would have worked and would have invited a caller to
 reassemble it wrongly.
+
+## The local-sequencer e2e, and what `RISC0_DEV_MODE=0` exercises
+
+`scripts/e2e-local-sequencer.sh` closes criterion 33: from a clean clone, one
+command starts a real standalone `sequencer_service` on a throwaway local port,
+funds the genesis test signer, deploys this registry's sealed guest to that local
+chain, initialises it, registers the canonical entry, and reads it back — the same
+lifecycle the public testnet ran, against a chain that exists only for the length
+of the run. It is deliberately kept out of CI: it needs the local LEZ checkout
+that carries the standalone sequencer and wallet, which the runners do not have,
+so the CI end-to-end (criterion 30) stays the read-only `sdk/tests/e2e.rs`.
+
+The one thing worth stating plainly is what `RISC0_DEV_MODE=0` buys here, because
+a PASS line that implied "minutes of real proving" would overclaim. The registry
+is an all-*public* SPEL program. LEZ executes a public transaction on the
+sequencer with risc0's `default_executor().execute()` — the real guest ELF and
+the real 32M-cycle limit, but **without** a per-transaction STARK
+(`lee/state_machine/src/program/mod.rs`, comment "Execute the program (without
+proving)"). Real STARK proving in LEZ is the client-side privacy-circuit proof,
+which a registry has no reason to use. So `RISC0_DEV_MODE=0` here is the
+*no-skip-path* half of the criterion — the sequencer, `spel` and the wallet all
+run with dev mode off, so nothing substitutes a fake receipt or a mocked verifier
+— rather than a long proof to wait on. What is exercised for real is the
+addressing and the checks: the program is deployed and called by its true RISC0
+ImageID, recomputed by the sequencer from the ELF, and `register` lands only
+because the guest, executed for real, agrees that the supplied clock account is
+owned by the pinned LEZ clock ImageID and that every derived seed matches. A run
+that finishes in seconds is correct rather than suspicious — the inverse of the
+privacy-path lifecycles, where a fast proof would be a faked one. The observed
+sequencer execution times are single-digit milliseconds per transaction, which is
+the executor doing real work with no proof attached, exactly as the design says.
