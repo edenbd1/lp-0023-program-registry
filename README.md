@@ -7,8 +7,11 @@ whether the source you are reading is the source that is running.
 This is a registry that answers those questions on chain, and a verification
 tool that answers the last one *honestly*.
 
-> **Status: early.** The core types and verification logic are here and tested.
-> The SPEL program, CLI, SDK and Basecamp app follow.
+> **Status: building toward the LP-0023 submission.** The SPEL program is deployed
+> and live on the public testnet; the CLI and SDK register, update, resolve and
+> search in process; the Basecamp module browses, searches and shows full entry
+> detail; and a read-only, self-hostable web explorer serves the whole registry.
+> What is not yet done is named in `docs/criteria-evidence.md` rather than glossed.
 
 ## Live on the public LEZ testnet
 
@@ -88,6 +91,24 @@ python3 ../scripts/package-lgx.py
 
 Qt **6.9.2** specifically: Basecamp 0.2.2 bundles that version and the bundled
 version is a ceiling, so a plugin built against a newer Qt is rejected at load.
+
+### The web explorer
+
+[`explorer/`](explorer/README.md) — a public, read-only web view of the whole
+registry: browse, search by name or author, and open any entry to its full
+metadata, IDL, source claim, and the account derivation that reproduces its
+address on screen. It is the block explorer the LEZ does not otherwise have.
+
+```bash
+docker build -f explorer/Dockerfile -t lez-registry-explorer . \
+  && docker run --rm -p 8080:8080 lez-registry-explorer
+```
+
+It is a *view*, not an authority: no database, no private index, no external CDN
+or analytics — it reads the chain and Logos Storage directly, so anyone can run
+their own instance from this source and get identical bytes, and the registry
+works completely without it. The explorer even verifies itself: it hashes its own
+running binary and shows that digest, with its source and commit, on `/about`.
 
 ### Check the whole document
 
