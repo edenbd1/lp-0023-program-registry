@@ -51,7 +51,7 @@ than described as nearly done.
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 24 | Document compute units for register and update | **met** | [CYCLES.md](../CYCLES.md) measures all four instruction bodies whole: register 6,399, update 5,215, claim_source 6,166, claim_canonical 6,627 — none above 0.021% of the 32M cap |
-| 25 | Lookup latency, and search across a registry of **at least 500 entries** | **partial** | [LATENCY.md](../LATENCY.md) measures 500 live lookups; the registry holds 4 entries, and the gap is stated there rather than glossed |
+| 25 | Lookup latency, and search across a registry of **at least 500 entries** | **met** | [`scripts/populate-and-measure-500.sh`](../scripts/populate-and-measure-500.sh) registers **500 distinct entries** on a local standalone `sequencer_service` (`RISC0_DEV_MODE=0`, the criterion-33 harness) and measures over all 500 through the SDK `Client` the explorer uses. The count is read straight off the global account first (`total_entries: 500`). Lookup stays one hash + one read and is size-independent at scale — hit p50 222µs vs miss p50 212µs, a 10µs gap with 500 entries on chain; a full `walk` enumeration of all 500 is ~240 ms mean (1001 sequential reads); search is that walk plus a ~40µs in-memory filter (500 / 1 / 100 hits for three needles). Local because standing up 500 *entries* on the public testnet is ~a day of block time, whereas the earlier public run measured 500 *lookups* — both are in [LATENCY.md](../LATENCY.md), and the walk's per-read cost is why it lives in the cached indexer, not the resolve path |
 
 ## Supportability
 
