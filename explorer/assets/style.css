@@ -68,6 +68,39 @@
   --shadow: 0 1px 2px rgba(16, 22, 28, 0.06), 0 8px 24px rgba(16, 22, 28, 0.06);
 }
 
+/* A visitor whose OS is set to light, and who has not chosen a theme on this
+ * page, is met in light straight from the stylesheet — before any script runs,
+ * and even with scripting off. app.js later stamps the same choice, so there is
+ * no dark-to-light flash on load; an explicit toggle stamps data-theme and wins
+ * over the OS either way. Dark stays the default for everyone else, as an
+ * instrument should. Values mirror the [data-theme="light"] block above; keep
+ * the two in sync. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --bg: #f5f6f8;
+    --bg-dot: rgba(64, 82, 120, 0.05);
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --surface-inset: #f7f8fa;
+    --border: #e2e6ec;
+    --border-strong: #cdd3dc;
+    --text: #12161c;
+    --text-dim: #545c6a;
+    --text-faint: #838c9a;
+    --brand: #2f6fe0;
+    --brand-strong: #1f56bd;
+    --brand-bg: rgba(47, 111, 224, 0.09);
+
+    --v-verified: #10876a;   --v-verified-bg: rgba(16, 135, 106, 0.10);
+    --v-claimed: #946400;    --v-claimed-bg: rgba(148, 100, 0, 0.10);
+    --v-unclaimed: #5a6472;  --v-unclaimed-bg: rgba(90, 100, 114, 0.09);
+    --v-unrepro: #b45c1b;    --v-unrepro-bg: rgba(180, 92, 27, 0.10);
+    --v-mismatch: #c23048;   --v-mismatch-bg: rgba(194, 48, 72, 0.09);
+
+    --shadow: 0 1px 2px rgba(16, 22, 28, 0.06), 0 8px 24px rgba(16, 22, 28, 0.06);
+  }
+}
+
 * { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
