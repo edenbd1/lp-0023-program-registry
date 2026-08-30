@@ -1,0 +1,25 @@
+[package]
+name = "lez-registry-explorer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A public, self-hostable block explorer for a LEZ program registry. A pure view over the chain: it holds no database, and every value it shows is re-derivable from the program id and read straight from the sequencer."
+
+[[bin]]
+name = "lez-registry-explorer"
+path = "src/main.rs"
+
+[dependencies]
+# The same crates the CLI, SDK and indexer read the chain with. The explorer
+# reimplements no derivation and no decoding of its own: an address it shows is
+# the address the on-chain program insists on, because it is computed by the
+# code the program links.
+lez-registry-core = { path = ".." }
+lez-registry-sdk = { path = "../sdk" }
+# Only for the optional outbound read to a Logos Storage gateway when resolving
+# an IDL. Same version the SDK already pins, so it adds nothing new to the tree.
+# The HTTP server itself is std-only (see src/main.rs).
+ureq = "2"
+
+[profile.release]
+overflow-checks = true
