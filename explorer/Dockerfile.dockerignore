@@ -1,0 +1,20 @@
+# Build-context ignore for explorer/Dockerfile (honoured by BuildKit as
+# <Dockerfile>.dockerignore). Keeps the context small and the build deterministic:
+# only the core crate, the sdk and the explorer are copied in the Dockerfile, and
+# none of their build artefacts or the repo's VCS/worktree state belong in it.
+**/target
+**/*.rlib
+.git
+.github
+# Crates the explorer build does not touch — excluded so an edit to them can never
+# change the explorer image or its context hash.
+program
+zkvm
+app
+vendor
+tools
+artifacts
+idl
+docs
+scripts
+*.md

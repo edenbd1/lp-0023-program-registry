@@ -20,6 +20,11 @@ lez-registry-sdk = { path = "../sdk" }
 # an IDL. Same version the SDK already pins, so it adds nothing new to the tree.
 # The HTTP server itself is std-only (see src/main.rs).
 ureq = "2"
+# For the explorer's own self-verification: at start-up it hashes the binary on
+# disk and shows that sha256 in-product, so a reader who rebuilds from source can
+# confirm the running site byte-for-byte. Same version core already pins, so it
+# adds nothing new to the tree.
+sha2 = { version = "0.10", default-features = false }
 
 [profile.release]
 overflow-checks = true

@@ -23,6 +23,7 @@ mod render;
 use lez_registry_core::{AccountId, Entry, GlobalState, ProgramId, Publisher, VerificationState};
 use lez_registry_sdk::{self as sdk, Client};
 use render::{IdlView, Site};
+use sha2::{Digest, Sha256};
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -31,6 +32,45 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
+/// Loopback by default — a `--host 0.0.0.0` is the deliberate opt-in a container
+/// makes, and is what `explorer/Dockerfile` passes so the port can be published.
+const DEFAULT_HOST: &str = "127.0.0.1";
+
+/// The explorer's own source, shown in-product so a reader can rebuild the site
+/// and confirm the running binary. A static string, not a call-out: nothing is
+/// fetched from it. See `/about` and `explorer/README.md`.
+const EXPLORER_REPO: &str = "https://github.com/edenbd1/lp-0023-program-registry";
+
+/// The commit the running binary was built from, baked in at build time by
+/// `explorer/Dockerfile` (`--build-arg SOURCE_COMMIT=…`). Absent for an ad-hoc
+/// `cargo run`, which is stated plainly rather than faked.
+fn explorer_commit() -> &'static str {
+    match option_env!("EXPLORER_SOURCE_COMMIT") {
+        Some(c) if !c.is_empty() => c,
+        _ => "unpinned (built outside the pinned image)",
+    }
+}
+
+/// sha256 of the running binary itself, computed once at start-up from
+/// `current_exe()`. This is the number a reader compares against `sha256sum` of
+/// their own rebuild — the explorer verifying itself. `None` if the executable
+/// cannot be read back (e.g. it was replaced under a running process).
+fn binary_digest() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let bytes = std::fs::read(exe).ok()?;
+    let mut h = Sha256::new();
+    h.update(&bytes);
+    Some(hex(&h.finalize()))
+}
+
+/// The explorer's own build identity: where its source lives, which commit the
+/// binary was built from, and the sha256 of the binary now serving. Held once and
+/// shown in-product so the site can be rebuilt and checked against what is running.
+struct Identity {
+    repo: &'static str,
+    commit: &'static str,
+    self_digest: String,
+}
 
 struct Config {
     registry: ProgramId,
@@ -41,13 +81,6 @@ struct Config {
 }
 
 impl Config {
-    fn site(&self) -> Site<'_> {
-        Site {
-            registry: self.registry,
-            registry_hex: &self.registry_hex,
-            endpoint: &self.endpoint,
-        }
-    }
     fn client(&self) -> Client {
         Client::new(self.endpoint.clone(), self.registry)
     }
@@ -64,10 +97,26 @@ struct Cache {
 
 struct App {
     cfg: Config,
+    identity: Identity,
     cache: Mutex<Cache>,
 }
 
 impl App {
+    /// The one deployment this instance views, plus this build's own identity,
+    /// scoped to a single request by the origin the client reached us on (its
+    /// `Host` header) so permalinks and social-card URLs are absolute and correct.
+    fn site(&self, origin: Option<String>) -> Site<'_> {
+        Site {
+            registry: self.cfg.registry,
+            registry_hex: &self.cfg.registry_hex,
+            endpoint: &self.cfg.endpoint,
+            origin,
+            repo: self.identity.repo,
+            commit: self.identity.commit,
+            self_digest: &self.identity.self_digest,
+        }
+    }
+
     /// The registry as a list, from the cache when fresh, otherwise from a walk.
     fn snapshot(&self) -> Result<(Vec<Entry>, Option<GlobalState>), String> {
         if let Some(ttl) = self.cfg.cache_ttl {
@@ -110,6 +159,7 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     };
     let endpoint = flag(&args, "--endpoint").unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+    let host = flag(&args, "--host").unwrap_or_else(|| DEFAULT_HOST.to_string());
     let port: u16 = flag(&args, "--port")
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
@@ -132,13 +182,18 @@ fn main() -> std::process::ExitCode {
             storage,
             cache_ttl,
         },
+        identity: Identity {
+            repo: EXPLORER_REPO,
+            commit: explorer_commit(),
+            self_digest: binary_digest().unwrap_or_else(|| "unavailable".to_string()),
+        },
         cache: Mutex::new(Cache::default()),
     });
 
-    let listener = match TcpListener::bind(("127.0.0.1", port)) {
+    let listener = match TcpListener::bind((host.as_str(), port)) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("cannot bind 127.0.0.1:{port}: {e}");
+            eprintln!("cannot bind {host}:{port}: {e}");
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -162,12 +217,26 @@ fn main() -> std::process::ExitCode {
             None => "off".to_string(),
         }
     );
+    // The explorer's own build identity, so the operator can see what a visitor
+    // sees on /about: rebuild this commit reproducibly and the digest matches.
+    println!(
+        "  source    {} @ {}",
+        app.identity.repo, app.identity.commit
+    );
+    println!("  binary    sha256 {}", app.identity.self_digest);
     // Warm the cache so the first visitor is not the one who waits for the walk.
     match app.snapshot() {
         Ok((e, _)) => println!("  warmed    {} entries", e.len()),
         Err(e) => println!("  warmed    failed ({e}); pages will retry on demand"),
     }
-    println!("\n  open http://127.0.0.1:{port}\n");
+    // Print a reachable URL: loopback stays loopback; a wildcard bind is shown as
+    // localhost because 0.0.0.0 is not an address a browser connects to.
+    let shown_host = if host == "0.0.0.0" || host == "::" {
+        "localhost"
+    } else {
+        host.as_str()
+    };
+    println!("\n  open http://{shown_host}:{port}   ·   /about explains why this cannot centralise the registry\n");
 
     for stream in listener.incoming().flatten() {
         let app = Arc::clone(&app);
@@ -204,7 +273,13 @@ fn handle(mut stream: TcpStream, app: &App) {
         None => (target, ""),
     };
 
-    let site = app.cfg.site();
+    // Read the request headers only to learn the origin the visitor reached us
+    // on (its `Host`, and a proxy's `X-Forwarded-Proto`). That origin makes the
+    // permalink and social-card URLs absolute and correct without hard-coding a
+    // deployment address — the server never phones it, it only echoes it back.
+    let origin = read_origin(&mut reader);
+
+    let site = app.site(origin);
 
     if path == "/" {
         match app.snapshot() {
@@ -264,6 +339,30 @@ fn handle(mut stream: TcpStream, app: &App) {
                 format!(r#"{{"error":{}}}"#, json_str(&e)).as_bytes(),
             ),
         }
+        return;
+    }
+
+    if path == "/about" {
+        // Live on-chain stats when the chain answers, and the page still renders
+        // (as a mostly-static explainer) when it does not — the four principles
+        // do not depend on a successful walk.
+        let stats = match app.snapshot() {
+            Ok((entries, global)) => {
+                let verified = global.map_or_else(
+                    || {
+                        entries
+                            .iter()
+                            .filter(|e| e.verification.is_verified())
+                            .count() as u64
+                    },
+                    |g| g.total_verified,
+                );
+                let total = global.map_or(entries.len() as u64, |g| g.total_entries);
+                Some((entries.len(), verified, total))
+            }
+            Err(_) => None,
+        };
+        respond_html(&mut stream, "200 OK", &render::about_page(&site, stats));
         return;
     }
 
@@ -476,6 +575,51 @@ fn flag(args: &[String], name: &str) -> Option<String> {
         .cloned()
 }
 
+/// Read request headers and return the origin the client reached us on, e.g.
+/// `https://registry.example`. Uses `Host`, and `X-Forwarded-Proto` when a proxy
+/// set it (default `http`). Header reading is bounded so a client cannot hold a
+/// worker open by dribbling headers, and a host with characters that have no
+/// business in an origin is dropped rather than reflected into a page.
+fn read_origin<R: BufRead>(reader: &mut R) -> Option<String> {
+    let mut host: Option<String> = None;
+    let mut proto: Option<String> = None;
+    for _ in 0..64 {
+        let mut h = String::new();
+        match reader.read_line(&mut h) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        let trimmed = h.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            break; // end of headers
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "host" => host = Some(value.trim().to_string()),
+                "x-forwarded-proto" => proto = Some(value.trim().to_string()),
+                _ => {}
+            }
+        }
+    }
+    let host = host?;
+    // A Host is host[:port], both drawn from a small, safe alphabet. Anything
+    // else is a malformed or hostile header; do not build a URL from it.
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
+        return None;
+    }
+    let scheme = if proto.as_deref() == Some("https") {
+        "https"
+    } else {
+        "http"
+    };
+    Some(format!("{scheme}://{host}"))
+}
+
 fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
         let (k, v) = kv.split_once('=')?;
@@ -609,14 +753,58 @@ USAGE
 OPTIONS
   --registry <HEX>          registry program id (default: the documented testnet deployment)
   --endpoint <URL>          sequencer JSON-RPC endpoint (default: {ep})
+  --host <ADDR>             bind address (default: {host}; a container passes 0.0.0.0)
   --port <N>                listen port (default: 8080)
   --storage-gateway <URL>   Logos Storage gateway to resolve IDL content ids (optional)
   --cache-ttl <SECONDS>     in-memory walk cache TTL (default: 10)
   --no-cache                read the chain on every request
   -h, --help                this message
 
+ROUTES
+  /                         the registry, as a table, with live on-chain stats
+  /program/<hex>            one entry, its derivation trace, and how to rebuild it
+  /search?q=<text>          name, author, program-id prefix, version, tag or state
+  /about                    why this cannot centralise the registry, and how to
+                            rebuild the explorer itself and confirm the running site
+  /api/programs.json        a machine-readable mirror of the list
+
 It holds no database. Everything it serves is read live from the chain and is
 re-derivable without it: turn it off and `lez-registry lookup <id>` still works.",
-        ep = DEFAULT_ENDPOINT
+        ep = DEFAULT_ENDPOINT,
+        host = DEFAULT_HOST,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_uses_host_and_forwarded_proto() {
+        let mut req: &[u8] = b"Host: registry.example\r\nX-Forwarded-Proto: https\r\n\r\n";
+        assert_eq!(
+            read_origin(&mut req),
+            Some("https://registry.example".to_string())
+        );
+    }
+
+    #[test]
+    fn origin_defaults_to_http_without_a_forwarded_proto() {
+        let mut req: &[u8] = b"Host: localhost:8080\r\n\r\n";
+        assert_eq!(
+            read_origin(&mut req),
+            Some("http://localhost:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn a_missing_or_hostile_host_yields_no_origin() {
+        // No Host at all — a malformed request; do not invent an address.
+        let mut none: &[u8] = b"Accept: text/html\r\n\r\n";
+        assert_eq!(read_origin(&mut none), None);
+        // A Host with characters that have no business in an origin is dropped
+        // rather than reflected into a page's canonical/og:url.
+        let mut hostile: &[u8] = b"Host: evil\" onload=x\r\n\r\n";
+        assert_eq!(read_origin(&mut hostile), None);
+    }
 }
