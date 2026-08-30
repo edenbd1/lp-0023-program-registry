@@ -517,6 +517,44 @@ footer.site-footer {
 }
 footer.site-footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 20px; justify-content: space-between; }
 footer.site-footer a { color: var(--text-dim); }
+footer.site-footer .self-verify { flex-basis: 100%; color: var(--text-faint); border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+
+/* ---------- Header nav link ---------- */
+.nav-link {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  padding: 6px 4px;
+  white-space: nowrap;
+}
+.nav-link:hover { color: var(--brand); text-decoration: none; }
+
+/* ---------- About: the four principles ---------- */
+.principles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 4px 0 0; }
+@media (max-width: 760px) { .principles { grid-template-columns: 1fr; } }
+.principle {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 16px 18px 18px;
+}
+.principle .pn {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--brand);
+  font-weight: 700;
+}
+.principle h3 { font-size: 1rem; margin: 4px 0 8px; letter-spacing: -0.01em; }
+.principle p { margin: 0; color: var(--text-dim); font-size: 0.88rem; }
+.principle em { font-style: normal; color: var(--text); }
+.principle pre.code { margin-top: 12px; }
+
+/* ---------- About: the self-verification panel ---------- */
+.self-verify-panel { border-left: 3px solid var(--brand); }
+.self-verify-panel em { font-style: normal; color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   main { animation: none; }

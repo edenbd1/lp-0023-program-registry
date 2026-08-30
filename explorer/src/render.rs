@@ -18,6 +18,23 @@ pub struct Site<'a> {
     pub registry: ProgramId,
     pub registry_hex: &'a str,
     pub endpoint: &'a str,
+    /// The origin the visitor reached this instance on (`https://host[:port]`),
+    /// used to make permalinks and social-card URLs absolute. `None` when no
+    /// usable `Host` header was sent; the page then omits absolute-URL tags
+    /// rather than inventing an address.
+    pub origin: Option<String>,
+    /// The explorer's *own* source, so the site can be rebuilt and checked
+    /// against what is running. These are the explorer verifying itself.
+    pub repo: &'a str,
+    pub commit: &'a str,
+    pub self_digest: &'a str,
+}
+
+impl Site<'_> {
+    /// An absolute URL for `path` when the origin is known, else the path itself.
+    fn abs(&self, path: &str) -> Option<String> {
+        self.origin.as_ref().map(|o| format!("{o}{path}"))
+    }
 }
 
 /// What the handler managed to do with an entry's IDL pointer, kept as data so
@@ -238,7 +255,11 @@ fn detail_href(e: &Entry) -> String {
     match e.publisher {
         Publisher::Canonical => format!("/program/{}", hex(&e.program_id)),
         Publisher::ThirdParty => {
-            format!("/program/{}?publisher={}", hex(&e.program_id), hex(&e.author))
+            format!(
+                "/program/{}?publisher={}",
+                hex(&e.program_id),
+                hex(&e.author)
+            )
         }
     }
 }
@@ -254,6 +275,7 @@ fn header(site: &Site, query: &str) -> String {
   <div class="header-search"><form action="/search" method="get" role="search">
     <input type="search" name="q" value="{q}" placeholder="Search name, author, program id, state…" aria-label="Search the registry" autocomplete="off">
   </form></div>
+  <a class="nav-link" href="/about">About</a>
   <button id="theme-toggle" class="theme-toggle" type="button">◑ dark</button>
 </div></header>
 <div class="provenance"><div class="wrap">
@@ -271,14 +293,107 @@ fn header(site: &Site, query: &str) -> String {
 fn footer(site: &Site) -> String {
     format!(
         r#"<footer class="site-footer"><div class="wrap">
-  <span>A self-hostable view over the LEZ program registry. Reads only; signs nothing; stores nothing.</span>
-  <span>registry <span class="mono">{}</span> · <a href="/api/programs.json">JSON</a></span>
+  <span>A self-hostable view over the LEZ program registry. Reads only; signs nothing; stores nothing. <a href="/about">How this stays decentralised →</a></span>
+  <span>registry <span class="mono">{reg}</span> · <a href="/api/programs.json">JSON</a></span>
+  <span class="self-verify" title="The explorer verifies itself: rebuild this commit reproducibly and the sha256 matches.">this build <span class="mono">{commit}</span> · binary sha256 <span class="mono">{digest}</span> · <a href="/about#self-verify">rebuild &amp; confirm</a></span>
 </div></footer>"#,
-        esc(site.registry_hex)
+        reg = esc(site.registry_hex),
+        commit = esc(&short_commit(site.commit)),
+        digest = esc(&short_hex_str(site.self_digest)),
+    )
+}
+
+/// A commit shown short when it is a full hash, verbatim when it is the
+/// "unpinned…" note so the reader is not misled into thinking it is a real sha.
+fn short_commit(commit: &str) -> String {
+    let is_hex = commit.len() >= 40 && commit.chars().all(|c| c.is_ascii_hexdigit());
+    if is_hex {
+        format!("{}…", &commit[..10])
+    } else {
+        commit.to_string()
+    }
+}
+
+/// Shorten a hex string (already a string, e.g. the binary digest) for display.
+fn short_hex_str(h: &str) -> String {
+    if h.len() <= 20 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        h.to_string()
+    } else {
+        format!("{}…{}", &h[..8], &h[h.len() - 8..])
+    }
+}
+
+/// Per-page social/SEO metadata. Kept dependency-light: every tag is a static
+/// string plus values already read from the chain — nothing here fetches or
+/// embeds an external resource, so the "pure view" claim survives a shared link.
+pub struct Meta {
+    /// `<meta name="description">` and the OG/Twitter description.
+    pub description: String,
+    /// og:title / twitter:title. Falls back to the page `<title>` when empty.
+    pub og_title: String,
+    /// The path (e.g. `/program/<hex>`) for `<link rel=canonical>` and og:url,
+    /// joined with the request origin. Absolute-URL tags are omitted when the
+    /// origin is unknown rather than pointing at a guessed host.
+    pub canonical_path: String,
+}
+
+impl Meta {
+    fn generic(canonical_path: &str) -> Self {
+        Self {
+            description: String::new(),
+            og_title: String::new(),
+            canonical_path: canonical_path.to_string(),
+        }
+    }
+}
+
+/// The description used when a page does not set its own.
+const SITE_DESCRIPTION: &str =
+    "A pure, self-hostable view over the Logos Execution Zone program registry. \
+     No database; every value is read live from the chain and re-derivable without this site.";
+
+/// The `<head>` meta block: description, canonical link, and Open Graph / Twitter
+/// card tags so a shared permalink renders a clean social card. A `summary` card
+/// is used deliberately — it needs no raster image and so pulls in no external
+/// asset, keeping the view pure.
+fn head_meta(site: &Site, title: &str, meta: &Meta) -> String {
+    let desc = if meta.description.is_empty() {
+        SITE_DESCRIPTION.to_string()
+    } else {
+        meta.description.clone()
+    };
+    let og_title = if meta.og_title.is_empty() {
+        title.to_string()
+    } else {
+        meta.og_title.clone()
+    };
+    let url_tags = match site.abs(&meta.canonical_path) {
+        Some(u) => format!(
+            "<link rel=\"canonical\" href=\"{u}\">\n<meta property=\"og:url\" content=\"{u}\">\n",
+            u = esc(&u)
+        ),
+        None => String::new(),
+    };
+    format!(
+        r#"<meta name="description" content="{desc}">
+{url_tags}<meta property="og:type" content="website">
+<meta property="og:site_name" content="LEZ Registry Explorer">
+<meta property="og:title" content="{og_title}">
+<meta property="og:description" content="{desc}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{og_title}">
+<meta name="twitter:description" content="{desc}">"#,
+        desc = esc(&desc),
+        url_tags = url_tags,
+        og_title = esc(&og_title),
     )
 }
 
 pub fn page(site: &Site, title: &str, query: &str, body: &str) -> String {
+    page_meta(site, title, query, &Meta::generic("/"), body)
+}
+
+pub fn page_meta(site: &Site, title: &str, query: &str, meta: &Meta, body: &str) -> String {
     format!(
         r#"<!doctype html>
 <html lang="en" data-theme="dark">
@@ -286,7 +401,7 @@ pub fn page(site: &Site, title: &str, query: &str, body: &str) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<meta name="description" content="A pure, self-hostable view over the Logos Execution Zone program registry.">
+{meta}
 <title>{title}</title>
 <style>{style}</style>
 </head>
@@ -299,6 +414,7 @@ pub fn page(site: &Site, title: &str, query: &str, body: &str) -> String {
 <script>{js}</script>
 </body>
 </html>"#,
+        meta = head_meta(site, title, meta),
         title = esc(title),
         style = STYLE,
         header = header(site, query),
@@ -312,9 +428,10 @@ pub fn page(site: &Site, title: &str, query: &str, body: &str) -> String {
 // the five-state legend, shown once under the list
 // ---------------------------------------------------------------------------
 
-fn legend() -> String {
-    // Build a synthetic entry per state purely to reuse the exact badge + sentence
-    // the rest of the UI uses, so the legend can never drift from the live cells.
+/// The `<div class="legend-grid">` of state badge + sentence, built from synthetic
+/// entries so it renders identically to the live cells and can never drift from
+/// them. Shared by the list legend and the /about states panel.
+fn legend_grid_only() -> String {
     let states = [
         (VerificationState::Verified, false),
         (VerificationState::Verified, true),
@@ -330,7 +447,10 @@ fn legend() -> String {
         let author: AccountId = [1u8; 32];
         let mut e = Entry::new(
             [0u8; 32],
-            Stamp { block: 0, millis: 0 },
+            Stamp {
+                block: 0,
+                millis: 0,
+            },
             "x".into(),
             "0".into(),
             author,
@@ -348,13 +468,17 @@ fn legend() -> String {
             sentence = esc(f.sentence),
         ));
     }
+    format!(r#"<div class="legend-grid">{items}</div>"#, items = items)
+}
+
+fn legend() -> String {
     format!(
         r#"<section class="legend">
   <h2>What the states mean</h2>
-  <p class="lead">Verified is the only green on this page, and it is earned rather than assumed. None of these is a tick: each says exactly what is known, and no more.</p>
-  <div class="legend-grid">{items}</div>
+  <p class="lead">Verified is the only green on this page, and it is earned rather than assumed. None of these is a tick: each says exactly what is known, and no more. <a href="/about#self-verify">Verified does not mean safe →</a></p>
+  {grid}
 </section>"#,
-        items = items
+        grid = legend_grid_only(),
     )
 }
 
@@ -416,8 +540,8 @@ pub fn list_page(site: &Site, entries: &[Entry], global: Option<&GlobalState>) -
         .iter()
         .filter(|e| matches!(e.publisher, Publisher::Canonical))
         .count();
-    let (declared_total, declared_verified) =
-        global.map_or((entries.len() as u64, verified as u64), |g| {
+    let (declared_total, declared_verified) = global
+        .map_or((entries.len() as u64, verified as u64), |g| {
             (g.total_entries, g.total_verified)
         });
 
@@ -548,12 +672,7 @@ lez-registry idl <b>{cid}</b> --from ./storage-dir</pre>"#,
     }
 }
 
-pub fn detail_page(
-    site: &Site,
-    e: &Entry,
-    publisher: Option<&AccountId>,
-    idl: &IdlView,
-) -> String {
+pub fn detail_page(site: &Site, e: &Entry, publisher: Option<&AccountId>, idl: &IdlView) -> String {
     let f = state_face(e);
     let author_b58 = sdk::base58(&e.author);
 
@@ -586,7 +705,10 @@ pub fn detail_page(
         None => String::new(),
     };
     let last_checked_row = match &e.verification.last_checked {
-        Some(s) => format!(r#"<div><dt>Last checked</dt><dd>{}</dd></div>"#, esc(&stamp_line(s))),
+        Some(s) => format!(
+            r#"<div><dt>Last checked</dt><dd>{}</dd></div>"#,
+            esc(&stamp_line(s))
+        ),
         None => r#"<div><dt>Last checked</dt><dd class="faint">never</dd></div>"#.to_string(),
     };
 
@@ -626,8 +748,13 @@ pub fn detail_page(
             rebuild = rebuild_block(site, e),
         ),
         Some(c) => {
-            let repo_dd = if c.repository.starts_with("http://") || c.repository.starts_with("https://") {
-                format!(r#"<a href="{r}" rel="noopener noreferrer nofollow" target="_blank">{r}</a>"#, r = esc(&c.repository))
+            let repo_dd = if c.repository.starts_with("http://")
+                || c.repository.starts_with("https://")
+            {
+                format!(
+                    r#"<a href="{r}" rel="noopener noreferrer nofollow" target="_blank">{r}</a>"#,
+                    r = esc(&c.repository)
+                )
             } else {
                 esc(&c.repository)
             };
@@ -686,12 +813,51 @@ pub fn detail_page(
         trace = derivation_trace(site, e, publisher),
         source = source_panel,
     );
-    page(
+
+    // Social card: title carries the verification state (the thing worth seeing
+    // before a click), description is the plain-English verdict plus whatever the
+    // author described. Canonical points at this entry's own permalink, carrying
+    // the publisher for a third-party entry so the card resolves back to itself.
+    let publisher_word = match e.publisher {
+        Publisher::Canonical => "canonical",
+        Publisher::ThirdParty => "third-party",
+    };
+    let card_desc = clip(
+        &format!(
+            "{label} · {publisher_word}. {tail}",
+            label = f.label,
+            tail = if e.description.is_empty() {
+                f.sentence
+            } else {
+                &e.description
+            },
+        ),
+        200,
+    );
+    let card = Meta {
+        description: card_desc,
+        og_title: format!("{} {} — {}", e.name, e.version, f.label),
+        canonical_path: detail_href(e),
+    };
+    page_meta(
         site,
         &format!("{} {} · LEZ Registry Explorer", e.name, e.version),
         "",
+        &card,
         &body,
     )
+}
+
+/// Plain-text clip to a character budget, for a meta description. Not HTML —
+/// `esc` runs later when it is placed into an attribute.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut o: String = s.chars().take(max.saturating_sub(1)).collect();
+        o.push('…');
+        o
+    }
 }
 
 /// How a reader rebuilds this exact entry and checks it locally. The whole
@@ -734,7 +900,151 @@ pub fn not_found(site: &Site, heading: &str, detail_html: &str) -> String {
         h = esc(heading),
         d = detail_html,
     );
-    page(site, &format!("{heading} · LEZ Registry Explorer"), "", &body)
+    page(
+        site,
+        &format!("{heading} · LEZ Registry Explorer"),
+        "",
+        &body,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// about — "How this stays decentralised", stated plainly, plus the explorer
+// verifying itself. Nothing here is boilerplate: each principle links to the
+// mechanism that makes it true, so a reader can check the claim, not just read it.
+// ---------------------------------------------------------------------------
+
+pub fn about_page(site: &Site, stats: Option<(usize, u64, u64)>) -> String {
+    // Live on-chain numbers when the chain answered; a plain note when it did not
+    // — the argument does not depend on a successful walk.
+    let stats_html = match stats {
+        Some((walked, verified, total)) => format!(
+            r#"<div class="stats" style="margin:18px 0 26px">
+  <div class="stat"><span class="n">{walked}</span><span class="l">Entries walked</span></div>
+  <div class="stat accent"><span class="n">{verified}</span><span class="l">Verified</span></div>
+  <div class="stat"><span class="n">{total}</span><span class="l">On-chain counter</span></div>
+</div>"#
+        ),
+        None => r#"<p class="detail-sub">Live counts are unavailable right now — the sequencer did not answer. That is itself the point: the registry does not depend on this site, and neither does anything below.</p>"#.to_string(),
+    };
+
+    // The four principles. Each states the promise and then the mechanism that
+    // keeps it, and links to where a reader can see that mechanism at work.
+    let principles = format!(
+        r#"<div class="principles">
+  <div class="principle">
+    <span class="pn">01</span>
+    <h3>Read-only. No proprietary database.</h3>
+    <p>Every value on every page is a live read of the chain through the same <span class="mono">lez-registry-sdk</span> the CLI links. The only state held is an in-memory walk cache with a short TTL, rebuilt from the chain and discarded on restart; nothing resolves <em>from</em> it. Run with <span class="mono">--no-cache</span> to remove even that. There is no table only this site has.</p>
+  </div>
+  <div class="principle">
+    <span class="pn">02</span>
+    <h3>Open source, self-hostable in one command — same data for everyone.</h3>
+    <p>The whole install is one command. Two instances pointed at the same registry and endpoint render the same bytes, because the data was never the server's — it belongs to the chain.</p>
+    <pre class="code"><span class="c"># Docker — pinned base, sealed offline build, nothing else to set up</span>
+docker build -t lez-registry-explorer -f explorer/Dockerfile .
+docker run --rm -p 8080:8080 lez-registry-explorer
+
+<span class="c"># or straight from source</span>
+cargo run --release --manifest-path explorer/Cargo.toml</pre>
+  </div>
+  <div class="principle">
+    <span class="pn">03</span>
+    <h3>The search index is the same open-source, self-hostable indexer.</h3>
+    <p>Search here runs the identical filter over the identical walk the repo's open-source <span class="mono">indexer</span> exposes as a service — no private index, no hosted secret. Run the indexer yourself when you want search to be a separate process; neither it nor this site is ever required to <em>resolve</em> a program. Resolution is a hash and one account read.</p>
+  </div>
+  <div class="principle">
+    <span class="pn">04</span>
+    <h3>The registry works fully without this site.</h3>
+    <p>The module, CLI and SDK are primary; the explorer is an accelerator for browsing, never a dependency for resolving. Turn it off and <span class="mono">lez-registry lookup &lt;id&gt;</span> still answers. Every entry page shows the <a href="{reg_entry}">derivation</a> that computes the account from the program id, ending in the exact <span class="mono">getAccount</span> you could run instead of trusting this page.</p>
+  </div>
+</div>"#,
+        reg_entry = esc(&format!("/program/{}", site.registry_hex)),
+    );
+
+    let self_verify = self_verify_section(site);
+
+    let states = format!(
+        r#"<section class="panel" style="margin-top:26px"><h2>The five verification states, and one caveat</h2><div class="body">
+  <p class="dim" style="margin:0 0 12px">Verified is the only green in this explorer, and it is earned rather than assumed. None of the five is a tick — each says exactly what is known and no more.</p>
+  {legend}
+  <div class="disclaimer" style="margin-top:18px"><span class="mk">!</span><p><b>Verified does not mean safe.</b> It proves one thing: rebuilding the stated source, at the stated commit, with the stated toolchain, produced the deployed bytecode. It does not prove the program is safe, that the author is who they say, or that the code does what its README claims.</p></div>
+</div></section>"#,
+        legend = legend_grid_only(),
+    );
+
+    let body = format!(
+        r#"<span class="eyebrow">About</span>
+<h1 class="page-title">How this stays decentralised</h1>
+<p class="detail-sub">A block explorer is the classic place a "no mandatory external services" promise quietly dies — the "official" explorer becomes the thing everyone actually trusts. This one is built so it cannot. Four principles, each checkable rather than merely asserted.</p>
+{stats}
+{principles}
+{self_verify}
+{states}"#,
+        stats = stats_html,
+        principles = principles,
+        self_verify = self_verify,
+        states = states,
+    );
+
+    let meta = Meta {
+        description: "How the LEZ Registry Explorer stays decentralised: read-only, no database, one-command self-host, an open-source search index, and a registry that works without the site — plus the explorer verifying its own build.".to_string(),
+        og_title: "How the LEZ Registry Explorer stays decentralised".to_string(),
+        canonical_path: "/about".to_string(),
+    };
+    page_meta(site, "About · LEZ Registry Explorer", "", &meta, &body)
+}
+
+/// The explorer verifying itself: its own repo, the commit the running binary was
+/// built from, the sha256 of that binary, and the exact commands to rebuild it
+/// and confirm the running site byte-for-byte.
+fn self_verify_section(site: &Site) -> String {
+    let commit_is_pinned =
+        site.commit.len() >= 40 && site.commit.chars().all(|c| c.is_ascii_hexdigit());
+    let pin_note = if commit_is_pinned {
+        String::new()
+    } else {
+        r#"<p class="dim" style="margin:10px 0 0"><b>This binary was not built from the pinned image</b>, so its commit is not stamped and its digest is machine-specific. Build it with <span class="mono">explorer/Dockerfile</span> for a commit and a digest every rebuilder reproduces.</p>"#.to_string()
+    };
+    format!(
+        r#"<section id="self-verify" class="panel self-verify-panel" style="margin-top:26px"><h2>The explorer verifies itself</h2><div class="body">
+  <p class="dim" style="margin:0 0 14px">This registry's whole argument is that you should be able to rebuild what is running and confirm it, rather than trust a badge. The explorer holds itself to that: below is its own source, the commit this binary was built from, and the sha256 of the binary now serving you. Rebuild the same commit reproducibly and the digest matches.</p>
+  <dl class="kv">
+    <div><dt>Source repository</dt><dd><a href="{repo}" rel="noopener noreferrer" target="_blank">{repo}</a></dd></div>
+    <div><dt>Built from commit</dt><dd class="mono">{commit}{commit_copy}</dd></div>
+    <div><dt>Running binary</dt><dd class="mono">sha256 {digest}{digest_copy}</dd></div>
+  </dl>
+  {pin_note}
+  <p class="dim" style="margin:16px 0 8px">Reproduce it yourself:</p>
+  <pre class="code"><span class="c"># 1. Rebuild the explorer at the commit above, sealed and reproducible</span>
+git clone {repo}
+cd lp-0023-program-registry &amp;&amp; git checkout {commit_arg}
+docker build -t lez-registry-explorer -f explorer/Dockerfile .
+
+<span class="c"># 2. Print the binary's sha256 and compare with the running one above</span>
+docker run --rm --entrypoint sha256sum lez-registry-explorer \
+  /usr/local/bin/lez-registry-explorer
+<span class="c"># expected</span>
+<b>{digest}</b></pre>
+  <p class="dim" style="margin:14px 0 0">Registered in the registry it displays? The registry keys on RISC0 ImageIDs — on-chain programs — and this explorer is a native binary, so it is honestly <em>not</em> an on-chain entry. What it can do, and does here, is practise the same source-verification discipline it exposes: a named source, a pinned toolchain, a sealed offline build, and a published digest anyone can reproduce. The registry's own program does the on-chain version of exactly this — see <a href="{reg_entry}">its self-attested entry</a>, slot 0, the registry registered in itself.</p>
+</div></section>"#,
+        repo = esc(site.repo),
+        commit = esc(site.commit),
+        commit_copy = if commit_is_pinned {
+            copy_btn(site.commit)
+        } else {
+            String::new()
+        },
+        commit_arg = esc(if commit_is_pinned {
+            site.commit
+        } else {
+            "HEAD"
+        }),
+        digest = esc(site.self_digest),
+        digest_copy = copy_btn(site.self_digest),
+        pin_note = pin_note,
+        reg_entry = esc(&format!("/program/{}", site.registry_hex)),
+    )
 }
 
 #[cfg(test)]
@@ -754,7 +1064,11 @@ mod tests {
             "zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55",
         ] {
             let bytes = core_::decode_content_id(cid).expect("known-good CID decodes");
-            assert_eq!(content_id_string(&bytes), cid, "re-encoding must reproduce {cid}");
+            assert_eq!(
+                content_id_string(&bytes),
+                cid,
+                "re-encoding must reproduce {cid}"
+            );
         }
     }
 
@@ -770,7 +1084,10 @@ mod tests {
         let author: AccountId = [9u8; 32];
         let mut e = Entry::new(
             [3u8; 32],
-            Stamp { block: 1, millis: 0 },
+            Stamp {
+                block: 1,
+                millis: 0,
+            },
             "x".into(),
             "1".into(),
             author,
@@ -779,6 +1096,133 @@ mod tests {
         .unwrap();
         e.publisher = Publisher::ThirdParty;
         let href = detail_href(&e);
-        assert!(href.contains("?publisher="), "third-party link must resolve back to itself, not the canonical entry");
+        assert!(
+            href.contains("?publisher="),
+            "third-party link must resolve back to itself, not the canonical entry"
+        );
+    }
+
+    /// A verified, self-attested entry, used to check the social card reflects the
+    /// verification state rather than a generic title.
+    fn verified_entry() -> Entry {
+        let author: AccountId = [1u8; 32];
+        let mut e = Entry::new(
+            [7u8; 32],
+            Stamp {
+                block: 1,
+                millis: 0,
+            },
+            "widget".into(),
+            "1.2".into(),
+            author,
+            Publisher::Canonical,
+        )
+        .unwrap();
+        e.verification.state = VerificationState::Verified;
+        e.verification.attester = Some(author);
+        e
+    }
+
+    #[test]
+    fn a_permalink_carries_open_graph_and_an_absolute_canonical_when_the_origin_is_known() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: Some("https://x.example".into()),
+            repo: "https://example/repo",
+            commit: "abc",
+            self_digest: "deadbeef",
+        };
+        let e = verified_entry();
+        let html = detail_page(&site, &e, None, &IdlView::None);
+        assert!(html.contains("og:title"), "an og:title is emitted");
+        assert!(
+            html.contains(r#"name="twitter:card" content="summary""#),
+            "a twitter summary card is declared"
+        );
+        // The card title reflects name, version and the verification state, so a
+        // shared link says what is known before it is clicked.
+        assert!(
+            html.contains("widget 1.2"),
+            "og:title carries name and version"
+        );
+        assert!(
+            html.contains("Verified"),
+            "og:title carries the verification state"
+        );
+        assert!(
+            html.contains(r#"<link rel="canonical" href="https://x.example/program/"#),
+            "canonical is absolute, built from the request origin"
+        );
+        assert!(
+            html.contains(r#"property="og:url" content="https://x.example/program/"#),
+            "og:url is absolute, built from the request origin"
+        );
+    }
+
+    #[test]
+    fn a_permalink_omits_absolute_urls_when_the_origin_is_unknown() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: None,
+            repo: "https://example/repo",
+            commit: "abc",
+            self_digest: "deadbeef",
+        };
+        let e = verified_entry();
+        let html = detail_page(&site, &e, None, &IdlView::None);
+        assert!(
+            !html.contains(r#"rel="canonical""#),
+            "no canonical is invented without a known origin"
+        );
+        assert!(
+            !html.contains("og:url"),
+            "no og:url is invented without an origin"
+        );
+        assert!(
+            html.contains("og:title"),
+            "the card title is still emitted; only the absolute-URL tags are held back"
+        );
+    }
+
+    #[test]
+    fn about_states_the_four_principles_the_caveat_and_the_running_binary_digest() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: Some("https://x.example".into()),
+            repo: "https://example/repo",
+            commit: "0123456789abcdef0123456789abcdef01234567",
+            self_digest: "cafebabecafebabe",
+        };
+        let html = about_page(&site, Some((6, 1, 6)));
+        assert!(html.contains("How this stays decentralised"));
+        assert_eq!(
+            html.matches(r#"class="principle">"#).count(),
+            4,
+            "exactly four principles are stated"
+        );
+        assert!(
+            html.contains("cafebabecafebabe"),
+            "the running binary's sha256 is shown so a rebuild can be compared"
+        );
+        assert!(
+            html.contains("0123456789abcdef"),
+            "the commit the binary was built from is shown"
+        );
+        assert!(
+            html.contains("Verified does not mean safe"),
+            "the safety caveat appears where states are explained"
+        );
     }
 }
