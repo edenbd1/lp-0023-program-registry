@@ -13,7 +13,10 @@
 //!
 //! Point them elsewhere with `LEZ_ENDPOINT` and `LEZ_REGISTRY`.
 
-use lez_registry_sdk::{base58, entry_address, Client, ProgramId};
+use lez_registry_sdk::{
+    base58, build_register, build_update, entry_address, Client, ProgramId, Publisher,
+    RegisterRequest, Role, UpdateRequest,
+};
 
 fn hex32(s: &str) -> ProgramId {
     let mut out = [0u8; 32];
@@ -105,6 +108,96 @@ fn every_verification_state_is_reachable_and_distinct() {
             "no entry is in state {wanted:?} — the state is unreachable in practice"
         );
     }
+}
+
+#[test]
+#[ignore = "talks to a real sequencer"]
+fn a_built_register_targets_the_address_the_chain_already_holds() {
+    // The strongest check available without submitting: build the register the
+    // registry's own entry would have come from, and assert its entry account is
+    // the address the live chain actually has an entry at. If the builder's
+    // account derivation drifted from the runtime's, this lands on an empty
+    // address and the assertion below fails.
+    let reg = registry();
+    let c = client();
+    let g = c.global().expect("answered").expect("global exists");
+
+    let tx = build_register(
+        &reg,
+        &RegisterRequest {
+            program: &reg,
+            author: &[0u8; 32],
+            publisher: Publisher::Canonical,
+            name: "lez-program-registry",
+            version: "0.7.0",
+            description: "The registry itself, registered in itself.",
+            clock: &[0u8; 32],
+            seq_index: g.total_entries,
+        },
+    )
+    .expect("valid metadata");
+
+    assert_eq!(
+        tx.entry_address(),
+        entry_address(&reg, &reg),
+        "the built entry account is the canonical entry address"
+    );
+    assert!(
+        c.account_data(&tx.entry_address())
+            .expect("answered")
+            .is_some(),
+        "nothing at {} — the builder's derivation has drifted from the runtime's",
+        base58(&tx.entry_address())
+    );
+    // The declared account order the program destructures: entry, global,
+    // directory, clock, author. Assert the two derivable ones agree with the
+    // read path's own derivations, live.
+    assert_eq!(tx.accounts[0].role, Role::Entry);
+    assert_eq!(tx.accounts[1].role, Role::Global);
+    assert_eq!(
+        tx.accounts[1].id,
+        lez_registry_sdk::global_address(&reg),
+        "the global slot is the singleton the chain answers for"
+    );
+}
+
+#[test]
+#[ignore = "talks to a real sequencer"]
+fn a_built_update_is_author_gated_against_the_live_entry() {
+    // update is the recorded author's alone. The builder cannot enforce that
+    // offline, but the read path can: build an update for the registry's own
+    // entry signed by a stranger, and confirm the on-chain author disagrees —
+    // which is exactly the check a caller runs before submitting a doomed tx.
+    let reg = registry();
+    let c = client();
+    let live = c
+        .entry(&reg)
+        .expect("answered")
+        .expect("the registry has its own entry");
+
+    let stranger = [0x5Au8; 32];
+    let tx = build_update(
+        &reg,
+        &UpdateRequest {
+            program: &reg,
+            author: &stranger,
+            publisher: Publisher::Canonical,
+            version: "0.7.1",
+            description: "an update a stranger is not entitled to make",
+            idl: "",
+        },
+    )
+    .expect("valid metadata");
+
+    assert_eq!(
+        tx.entry_address(),
+        entry_address(&reg, &reg),
+        "update touches the same entry resolve returns"
+    );
+    assert_ne!(
+        live.author, stranger,
+        "the recorded author is not the stranger, so the program would reject this update"
+    );
 }
 
 #[test]

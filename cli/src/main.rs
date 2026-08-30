@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Registry CLI.
 //!
-//! It computes addresses and verifies builds; it does not sign transactions.
-//! Submission goes through `spel` with the registry's IDL, which is the tool the
-//! ecosystem already has — reimplementing transaction construction here would
-//! be a second thing to keep correct for no gain.
+//! It computes addresses, verifies builds, and now **builds `register` and
+//! `update` transactions in process** — the accounts in the order the program
+//! reads them and the risc0-serde instruction words, produced by the SDK rather
+//! than assembled by `spel` from an IDL. What it does not do is hold a key: the
+//! built transaction is handed to a wallet-backed signer, because a key belongs
+//! where an operator can see what they are signing, not in a tool that also
+//! prints addresses.
 //!
-//! Everything it prints comes from `lez-registry-core`, the same crate the
-//! on-chain program links, so an address this tool shows is the address the
-//! program will insist on.
+//! Everything it prints comes from `lez-registry-core` and `lez-registry-sdk`,
+//! the same crates the on-chain program and the read path link, so an address
+//! this tool shows is the address the program will insist on and the bytes it
+//! emits are the bytes the program decodes.
 
 use lez_registry_core as core_;
+use lez_registry_sdk::{
+    build_register, build_update, BuiltTransaction, RegisterRequest, UpdateRequest,
+};
 use std::process::ExitCode;
 
 const BASE58: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -80,7 +87,25 @@ lez-registry — addresses and build verification for the LEZ program registry
         and not sufficient: see `verify --explain`.
 
   verify --explain
-        Why a hash match is not proof of provenance."
+        Why a hash match is not proof of provenance.
+
+  register <PROGRAM_ID_HEX> --name <N> --version <V> --author <ACCT>
+           [--description <D>] [--third-party] [--clock <ACCT>] [--seq-index <N>]
+        Build the register transaction in process — no `spel`. Accounts and the
+        instruction words come from the SDK's builder; the entry address is
+        re-derived, never chosen. Canonical by default; --third-party keys the
+        entry by --author instead. --seq-index defaults to the chain's current
+        total_entries. Prints the unsigned transaction for a wallet to sign.
+
+  update <PROGRAM_ID_HEX> --version <V> --author <ACCT>
+           [--description <D>] [--idl <CONTENT_ID>] [--third-party]
+        Build the update transaction in process. Rewrites version, description
+        and the IDL pointer (empty --idl clears it). Only the recorded author
+        may update; this checks the on-chain author first and refuses to pretend
+        otherwise. Prints the unsigned transaction for a wallet to sign.
+
+An account (--author, --clock) is hex or base58. Submission is a wallet's job:
+this tool constructs the exact bytes and stops at the signature."
     );
     ExitCode::from(2)
 }
@@ -170,6 +195,8 @@ fn main() -> ExitCode {
         "search" => search_cmd(&args),
         "idl" => idl_cmd(&args),
         "verify" => verify(&args),
+        "register" => register_cmd(&args),
+        "update" => update_cmd(&args),
         _ => usage(),
     }
 }
@@ -464,6 +491,9 @@ fn hex_n(b: &[u8]) -> String {
 /// The registry this CLI talks to unless told otherwise.
 const DEFAULT_REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
+/// The every-block clock account. `register` reads it for the registration
+/// timestamp; the program refuses any account the LEZ clock program does not own.
+const DEFAULT_CLOCK: &str = "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU";
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a String> {
     args.iter()
@@ -568,5 +598,241 @@ fn search_cmd(args: &[String]) -> ExitCode {
             state_line(e)
         );
     }
+    ExitCode::SUCCESS
+}
+
+/// An account id on the command line is hex (64 chars, optional `0x`) or the
+/// base58 a wallet and an explorer print. Try hex first, then base58.
+fn parse_account(s: &str) -> Option<[u8; 32]> {
+    from_hex(s).or_else(|| lez_registry_sdk::from_base58(s))
+}
+
+fn has_flag(args: &[String], name: &str) -> bool {
+    args.iter().any(|a| a == name)
+}
+
+/// Print an unsigned built transaction: the accounts in the order the program
+/// reads them, and the instruction words a wallet signs and submits.
+fn print_tx(tx: &BuiltTransaction) {
+    println!("built {} transaction (unsigned)", tx.instruction);
+    println!("  registry     {}", hex(&tx.registry));
+    println!(
+        "  instruction  {} (variant index {})",
+        tx.instruction, tx.instruction_index
+    );
+    println!("  accounts (in the order the program destructures them):");
+    for a in &tx.accounts {
+        let mut flags: Vec<&str> = Vec::new();
+        if a.signer {
+            flags.push("signer");
+        }
+        if a.writable {
+            flags.push("writable");
+        }
+        let fl = if flags.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", flags.join(", "))
+        };
+        println!("    {:<10} {}{}", a.role.as_str(), to_base58(&a.id), fl);
+    }
+    let words: Vec<String> = tx
+        .instruction_words
+        .iter()
+        .map(|w| format!("{w:08x}"))
+        .collect();
+    println!(
+        "  instruction data ({} u32 words):",
+        tx.instruction_words.len()
+    );
+    println!("    {}", words.join(" "));
+    println!(
+        "  instruction data (LE bytes): {}",
+        hex_n(&tx.instruction_data_bytes())
+    );
+    println!();
+    println!("  This is the program-defined half of a LEZ public transaction: the accounts");
+    println!("  above and the risc0-serde instruction words. Hand the account list, the");
+    println!("  signer(s) and these words to a wallet-backed signer to sign and submit —");
+    println!("  no `spel` and no IDL in the path. The tool stops at the signature on");
+    println!("  purpose: a key belongs where an operator sees what they are signing.");
+}
+
+fn register_cmd(args: &[String]) -> ExitCode {
+    let Some(program) = args.get(1).and_then(|s| from_hex(s)) else {
+        eprintln!(
+            "register <PROGRAM_ID_HEX> --name <N> --version <V> --author <ACCT> \
+             [--description <D>] [--third-party] [--clock <ACCT>] [--seq-index <N>]"
+        );
+        return ExitCode::FAILURE;
+    };
+    let (Some(name), Some(version)) = (flag(args, "--name"), flag(args, "--version")) else {
+        eprintln!("--name and --version are required");
+        return ExitCode::FAILURE;
+    };
+    let description = flag(args, "--description").cloned().unwrap_or_default();
+    let Some(author) = flag(args, "--author").and_then(|s| parse_account(s)) else {
+        eprintln!("--author <ACCT> is required (hex or base58)");
+        return ExitCode::FAILURE;
+    };
+    let Some(clock) = parse_account(flag(args, "--clock").map_or(DEFAULT_CLOCK, String::as_str))
+    else {
+        eprintln!("--clock is not a 32-byte account id");
+        return ExitCode::FAILURE;
+    };
+    let publisher = if has_flag(args, "--third-party") {
+        core_::Publisher::ThirdParty
+    } else {
+        core_::Publisher::Canonical
+    };
+    let seq_index_flag = match flag(args, "--seq-index").map(|s| s.parse::<u64>()) {
+        Some(Ok(n)) => Some(n),
+        Some(Err(_)) => {
+            eprintln!("--seq-index must be a non-negative integer");
+            return ExitCode::FAILURE;
+        }
+        None => None,
+    };
+
+    let Some(c) = client(args) else {
+        return ExitCode::FAILURE;
+    };
+    let registry = *c.registry();
+
+    // The directory slot is the counter's current value, and the program
+    // re-derives it and refuses a seed that is not the slot this registration
+    // lands in. Read it from the chain unless the caller pinned it for offline
+    // building.
+    let seq_index = match seq_index_flag {
+        Some(n) => n,
+        None => {
+            match c.global() {
+                Ok(g) => g.map_or(0, |g| g.total_entries),
+                Err(e) => {
+                    eprintln!("could not read the registry counters ({e}); pass --seq-index to build offline");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    };
+
+    let tx = match build_register(
+        &registry,
+        &RegisterRequest {
+            program: &program,
+            author: &author,
+            publisher,
+            name,
+            version,
+            description: &description,
+            clock: &clock,
+            seq_index,
+        },
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("cannot build register: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // A re-register is not silently overwritten: the program's `init` refuses an
+    // occupied address. Say so before a caller signs a transaction that cannot
+    // land. Skipped silently when offline — the build is still correct.
+    if let Ok(Some(_)) = c.account_data(&tx.entry_address()) {
+        println!(
+            "warning: an entry already exists at {} — the program's `init` will reject a re-register",
+            to_base58(&tx.entry_address())
+        );
+    }
+    if matches!(publisher, core_::Publisher::ThirdParty) {
+        println!("  third-party entry — keyed by the author, so it never collides with the canonical one");
+    }
+    println!("  registration timestamp comes from the clock account, not from you");
+    println!();
+    print_tx(&tx);
+    ExitCode::SUCCESS
+}
+
+fn update_cmd(args: &[String]) -> ExitCode {
+    let Some(program) = args.get(1).and_then(|s| from_hex(s)) else {
+        eprintln!(
+            "update <PROGRAM_ID_HEX> --version <V> --author <ACCT> \
+             [--description <D>] [--idl <CONTENT_ID>] [--third-party]"
+        );
+        return ExitCode::FAILURE;
+    };
+    let Some(version) = flag(args, "--version") else {
+        eprintln!("--version is required (update rewrites it)");
+        return ExitCode::FAILURE;
+    };
+    let description = flag(args, "--description").cloned().unwrap_or_default();
+    let idl = flag(args, "--idl").cloned().unwrap_or_default();
+    let Some(author) = flag(args, "--author").and_then(|s| parse_account(s)) else {
+        eprintln!("--author <ACCT> is required (hex or base58)");
+        return ExitCode::FAILURE;
+    };
+    let publisher = if has_flag(args, "--third-party") {
+        core_::Publisher::ThirdParty
+    } else {
+        core_::Publisher::Canonical
+    };
+
+    let Some(c) = client(args) else {
+        return ExitCode::FAILURE;
+    };
+    let registry = *c.registry();
+
+    let tx = match build_update(
+        &registry,
+        &UpdateRequest {
+            program: &program,
+            author: &author,
+            publisher,
+            version,
+            description: &description,
+            idl: &idl,
+        },
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("cannot build update: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // update is the recorded author's alone, and the builder cannot know who
+    // that is offline. The read path can: check before a caller signs a
+    // transaction the program will refuse.
+    let live = if matches!(publisher, core_::Publisher::ThirdParty) {
+        c.third_party_entry(&program, &author)
+    } else {
+        c.entry(&program)
+    };
+    match live {
+        Ok(Some(e)) => {
+            if e.author != author {
+                println!(
+                    "warning: this entry's recorded author is {} — a transaction signed by {} will be refused (only the author may update)",
+                    to_base58(&e.author),
+                    to_base58(&author)
+                );
+            }
+            if e.frozen {
+                println!("warning: this entry is frozen — the program will refuse any update");
+            }
+        }
+        Ok(None) => {
+            println!(
+                "warning: nothing is registered at {} — there is nothing to update",
+                to_base58(&tx.entry_address())
+            );
+        }
+        // Offline or a transport error: the built transaction is still correct;
+        // the author check simply could not run.
+        Err(_) => {}
+    }
+    println!();
+    print_tx(&tx);
     ExitCode::SUCCESS
 }

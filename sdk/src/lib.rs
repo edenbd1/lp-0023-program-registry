@@ -18,6 +18,12 @@ pub use lez_registry_core::{
 };
 use sha2::{Digest, Sha256};
 
+pub mod tx;
+pub use tx::{
+    build_register, build_update, AccountMeta, BuildError, BuiltTransaction, RegisterRequest, Role,
+    UpdateRequest,
+};
+
 /// Domain separator LEZ hashes into every program-derived address.
 ///
 /// Copied from the runtime rather than invented: `lee/state_machine/core`,
@@ -87,6 +93,45 @@ pub fn base58(bytes: &[u8; 32]) -> String {
     out.extend(std::iter::repeat_n('1', leading));
     out.extend(digits.iter().rev().map(|d| ALPHABET[*d as usize] as char));
     out
+}
+
+/// Decode a base58 account id back to 32 bytes. `None` on a bad character or a
+/// length that is not 32 bytes — an account id is fixed-size, so a string that
+/// decodes to any other length is not one and must not be half-accepted.
+///
+/// The inverse of [`base58`], and the reason the CLI can take an author or a
+/// clock account as the `z…`-free base58 an explorer or a wallet prints, rather
+/// than forcing hex.
+#[must_use]
+pub fn from_base58(s: &str) -> Option<[u8; 32]> {
+    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut bytes: Vec<u8> = Vec::with_capacity(32);
+    for c in s.bytes() {
+        let mut carry = ALPHABET.iter().position(|&a| a == c)? as u32;
+        for byte in &mut bytes {
+            carry += u32::from(*byte) * 58;
+            *byte = (carry & 0xff) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            bytes.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+    // Leading '1's are leading zero bytes and carry no value through the loop.
+    for c in s.bytes() {
+        if c != b'1' {
+            break;
+        }
+        bytes.push(0);
+    }
+    if bytes.len() != 32 {
+        return None;
+    }
+    bytes.reverse();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Some(out)
 }
 
 #[derive(Debug)]
@@ -276,6 +321,25 @@ mod tests {
             base58(&global_address(&registry())),
             "75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z",
             "the singleton global account"
+        );
+    }
+
+    #[test]
+    fn from_base58_is_the_inverse_of_base58() {
+        // Round-trip a known live address, and reject a string that decodes to
+        // the wrong length rather than half-accepting it.
+        let addr = entry_address(&registry(), &registry());
+        let s = base58(&addr);
+        assert_eq!(from_base58(&s), Some(addr));
+        assert_eq!(
+            from_base58("wkLxSjsYNRq24FKPzDSh1haT382zwMU5QFb2YuHRD4h"),
+            Some(addr)
+        );
+        assert_eq!(from_base58("too-short"), None);
+        assert_eq!(
+            from_base58("0OIl"),
+            None,
+            "0, O, I, l are not base58 digits"
         );
     }
 
