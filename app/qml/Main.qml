@@ -229,6 +229,11 @@ Item {
             root.walking = false
             root.loaded  = true
             root.status  = found + " entries read from " + bridge.endpoint()
+            // The walk grows allEntries with in-place push, which a `var`
+            // property does not notify on; reassign so the "N programs" count
+            // (and anything else bound to its length) updates now that the set
+            // is complete.
+            root.allEntries = root.allEntries.slice()
             root.rebuild()
         }
 

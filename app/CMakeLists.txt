@@ -102,4 +102,19 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy
             ${CMAKE_CURRENT_SOURCE_DIR}/metadata.json
             $<TARGET_FILE_DIR:lez_program_registry_plugin>/module.json)
+
+    # A standalone preview harness for local QML iteration (dev only). Guarded so
+    # it never affects the plugin build or CI: it builds a tiny executable that
+    # loads Main.qml with the same `bridge` context object Basecamp provides, so
+    # the browse/detail UI can be run and screenshotted without a full Basecamp
+    # install. This is the "standalone preview app" the header refers to.
+    option(BUILD_PREVIEW "Build the standalone QML preview harness (dev only)" OFF)
+    if(BUILD_PREVIEW)
+        qt_add_executable(registry_preview
+            src/preview_main.cpp
+            src/registry_bridge.h
+            src/registry_bridge.cpp)
+        target_link_libraries(registry_preview PRIVATE
+            Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::Network)
+    endif()
 endif()
