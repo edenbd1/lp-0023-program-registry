@@ -1,5 +1,5 @@
 app/aqtinstall.log
-app/build/
+app/build*/
 program/target/
 target/
 vendor-guest/
