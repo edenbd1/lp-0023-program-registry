@@ -55,6 +55,18 @@ int main(int argc, char** argv) {
         });
     }
 
+    // With PREVIEW_LOOKUP set to a 64-char program id, resolve it after the
+    // walk so the detail page can be previewed too (the walk owns the first few
+    // seconds; a lookup after it navigates into the entry).
+    const QString lookupHex = qEnvironmentVariable("PREVIEW_LOOKUP");
+    if (!lookupHex.isEmpty()) {
+        const int lms =
+            qEnvironmentVariable("PREVIEW_LOOKUP_MS", QStringLiteral("4000")).toInt();
+        QTimer::singleShot(lms, &app, [&bridge, lookupHex]() {
+            bridge.lookup(lookupHex);
+        });
+    }
+
     view.show();
     return app.exec();
 }
