@@ -699,3 +699,7 @@ ul.plain li { margin: 4px 0; }
   .table-card tbody td, .table-card tbody td:not(:last-child) { border-bottom: 0 !important; }
   .table-card tbody tr td:first-child { padding-bottom: 4px; }
 }
+
+.grid2 > * { min-width: 0; }
+pre.code { overflow-x: auto; max-width: 100%; }
+dl.kv dd { overflow-wrap: anywhere; }

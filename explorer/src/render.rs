@@ -866,22 +866,45 @@ fn clip(s: &str, max: usize) -> String {
 /// registry's argument is that this does not need the site.
 fn rebuild_block(_site: &Site, e: &Entry) -> String {
     let pid = hex(&e.program_id);
-    let claimed = e.verification.claim.is_some();
-    let rebuild = if claimed {
-        format!(
-            r#"
+    // The steps name *this entry's* claim — its repository, commit and builder —
+    // so they rebuild the program the entry is about, not this registry.
+    let rebuild = match &e.verification.claim {
+        Some(cl) => {
+            let dir = cl
+                .repository
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("source")
+                .trim_end_matches(".git")
+                .to_string();
+            format!(
+                r#"
 
-<span class="c"># Rebuild the claimed source sealed (network disabled) and compare the ImageID:</span>
-./scripts/build-sealed.sh
-spel program-id artifacts/programs/*.bin   <span class="c"># must equal the program id below</span>
-lez-registry deployment-digest artifacts/programs/*.bin
+<span class="c"># Rebuild the claimed source at the claimed commit, with the claimed builder:</span>
+git clone {repo} && cd {dir}
+git checkout {commit}
+<span class="c"># build with the RISC Zero builder image sha256:{img}, toolchain {tc}{net}</span>
+spel program-id &lt;the built .bin&gt;   <span class="c"># must equal the program id below</span>
+lez-registry verify &lt;the built .bin&gt; --expect &lt;its deployment digest&gt; --mark --program {pid}
+<span class="c">#   ↑ on a match, marks it locally verified — for you, on your machine only</span>
 
 <span class="c"># expected program id</span>
 <b>{pid}</b>"#,
-            pid = esc(&pid)
-        )
-    } else {
-        String::new()
+                repo = esc(&cl.repository),
+                dir = esc(&dir),
+                commit = esc(&hex(&cl.commit)),
+                img = esc(&hex(&cl.build.image_digest)),
+                tc = esc(&cl.build.toolchain),
+                net = if cl.build.network_disabled {
+                    ", network disabled"
+                } else {
+                    " — the claimed build had network access, so a match is weak evidence"
+                },
+                pid = esc(&pid),
+            )
+        }
+        None => String::new(),
     };
     format!(
         r#"<div style="margin-top:14px"><span class="eyebrow">Rebuild &amp; verify locally</span>
@@ -1232,7 +1255,7 @@ cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
     <span class="pn">03</span>
     <h3>Prove your source. Optional, and the part that counts.</h3>
     <p>Record the repository, commit and build configuration that reproduce your bytecode. Anyone can rebuild it; a match earns <span class="badge v-verified">Verified</span>, and anyone whose own rebuild matches can mark it locally verified for themselves.</p>
-    <pre class="code">cli/target/release/lez-registry verify &lt;rebuilt.bin&gt; --expect &lt;YOUR_PROGRAM_ID&gt; --mark</pre>
+    <pre class="code">cli/target/release/lez-registry verify &lt;rebuilt.bin&gt; --expect &lt;DEPLOYMENT_DIGEST&gt; --mark --program &lt;YOUR_PROGRAM_ID&gt;</pre>
   </div>
   <div class="principle">
     <span class="pn">04</span>
