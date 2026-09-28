@@ -275,6 +275,7 @@ fn header(site: &Site, query: &str) -> String {
   <div class="header-search"><form action="/search" method="get" role="search">
     <input type="search" name="q" value="{q}" placeholder="Search name, author, program id, state…" aria-label="Search the registry" autocomplete="off">
   </form></div>
+  <a class="nav-link" href="/register">Register</a>
   <a class="nav-link" href="/adoption">Adoption</a>
   <a class="nav-link" href="/about">About</a>
   <button id="theme-toggle" class="theme-toggle" type="button">◑ dark</button>
@@ -562,7 +563,7 @@ pub fn list_page(site: &Site, entries: &[Entry], global: Option<&GlobalState>) -
     let body = format!(
         r#"<span class="eyebrow">All registered programs</span>
 <h1 class="page-title">Registry</h1>
-<p class="detail-sub">Enumerated by walking the registry's own on-chain sequence directory — no account index exists on this chain, and none is trusted. Each row links to an entry you can re-derive and re-read yourself.</p>
+<p class="detail-sub">Enumerated by walking the registry's own on-chain sequence directory — no account index exists on this chain, and none is trusted. Each row links to an entry you can re-derive and re-read yourself. <a href="/register">Deployed a program? Register it →</a></p>
 {stats}
 {table}
 {legend}"#,
@@ -1379,4 +1380,54 @@ pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[Account
 
 fn sdk_b58(a: &AccountId) -> String {
     base58btc(a)
+}
+
+// ---------------------------------------------------------------------------
+// register
+// ---------------------------------------------------------------------------
+
+pub fn register_page(site: &Site) -> String {
+    let body = format!(
+        r#"<span class="eyebrow">For builders</span>
+<h1 class="page-title">Register your program</h1>
+<p class="detail-sub">A few minutes and one transaction. Your program then shows up — with a name, an author and a resolvable interface — in every wallet, explorer and tool that reads this registry, and anyone can check it was built from the source you name.</p>
+<div class="principles">
+  <div class="principle">
+    <span class="pn">01</span>
+    <h3>Put your IDL on Logos Storage.</h3>
+    <p>The entry keeps a pointer, not the IDL itself, so it stays cheap and the interface stays fetchable by anyone.</p>
+    <pre class="code">tools/storage-upload.sh path/to/your.idl.json   <span class="c"># prints a content id, z…</span></pre>
+  </div>
+  <div class="principle">
+    <span class="pn">02</span>
+    <h3>Register.</h3>
+    <p>Name, version, description and the IDL content id. The registration time is read from the sequencer's clock account — nobody, you included, can choose it. The address is derived from your program id, so the entry cannot be put anywhere else.</p>
+    <pre class="code">git clone https://github.com/edenbd1/lp-0023-program-registry && cd lp-0023-program-registry
+cargo build --release --manifest-path cli/Cargo.toml
+cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
+<span class="c"># then register through spel against this registry:</span>
+<span class="c">#   registry program id {reg}</span></pre>
+  </div>
+  <div class="principle">
+    <span class="pn">03</span>
+    <h3>Prove your source. Optional, and the part that counts.</h3>
+    <p>Record the repository, commit and build configuration that reproduce your bytecode. Anyone can rebuild it; a match earns <span class="badge v-verified">Verified</span>, and anyone whose own rebuild matches can mark it locally verified for themselves.</p>
+    <pre class="code">cli/target/release/lez-registry verify &lt;rebuilt.bin&gt; --expect &lt;YOUR_PROGRAM_ID&gt; --mark</pre>
+  </div>
+  <div class="principle">
+    <span class="pn">04</span>
+    <h3>Check it.</h3>
+    <p>Open your program here, or resolve it without this site at all — one hash and one account read. Only you, the registering author, can update the entry afterwards.</p>
+    <pre class="code">cli/target/release/lez-registry lookup &lt;YOUR_PROGRAM_ID&gt;</pre>
+  </div>
+</div>
+<p class="detail-sub">On testnet 0.3 a program is identified by its header account, and the entry that account signs is the one shown as the deployer's. The steps stay the same. <a href="/adoption">See how many programs are registered so far →</a></p>"#,
+        reg = esc(site.registry_hex),
+    );
+    page(
+        site,
+        "Register your program · LEZ Registry Explorer",
+        "",
+        &body,
+    )
 }

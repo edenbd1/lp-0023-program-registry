@@ -693,3 +693,9 @@ ul.plain li { margin: 4px 0; }
 }
 .panel > p, .panel > ul.plain, .panel > .months { margin-left: 18px; margin-right: 18px; }
 .panel > p:last-child { margin-bottom: 16px; }
+.principles > .principle { min-width: 0; }
+.principle pre.code { overflow-x: auto; max-width: 100%; }
+@media (max-width: 720px) {
+  .table-card tbody td, .table-card tbody td:not(:last-child) { border-bottom: 0 !important; }
+  .table-card tbody tr td:first-child { padding-bottom: 4px; }
+}
