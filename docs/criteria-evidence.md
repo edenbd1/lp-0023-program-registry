@@ -1,9 +1,14 @@
 # LP-0023 criteria, and where this submission actually stands
 
-The prize text is [PR #127](https://github.com/logos-co/lambda-prize/pull/127) on
-`logos-co/lambda-prize` (`prizes/LP-0023.md`, now **open (non-draft) and
-mergeable**, still on the PR branch rather than `master`). Criteria are quoted
-from that PR — re-read it before submitting, since an open PR can still change.
+The prize text is [`prizes/LP-0023.md`](https://github.com/logos-co/lambda-prize/blob/master/prizes/LP-0023.md)
+on `logos-co/lambda-prize`, **merged and open since 2026-09-21** (PR #157), with a
+**$2,000** prize to the first submission that meets every criterion. The rows
+below were written against the August draft (PR #127); where the final text
+differs, the difference is noted in the row or in the section after the tables.
+
+**The final text targets testnet 0.3 throughout**, and the 0.3 program model is
+new — see [lez-0.3-migration.md](lez-0.3-migration.md). Every *met* below was
+met against the v0.2.4 zone and will be re-established on 0.3.
 
 Status is one of **met**, **partial**, or **open**. Nothing is marked met that
 has not been run; where a criterion is partial, what is missing is named rather
@@ -15,7 +20,7 @@ than described as nearly done.
 |---|---|---|---|
 | 1 | On-chain registry program in SPEL with a published IDL | **met** | `program/`, `idl/lez_registry.idl.json`, deployed — see [DEPLOYMENTS.md](../DEPLOYMENTS.md) |
 | 2 | Register with name, version, author, description, tags, IDL pointer, **registration timestamp**; per-program PDA derivable without an indexer | **met** | `register`; the timestamp is read from the sequencer's clock account, not supplied by the caller — see below |
-| 3 | Canonical vs third-party entries, distinguishable on chain; unauthorised canonical attempt rejected in the demo | **met** | `claim_canonical` makes the canonical slot takeable by whoever reproduces the deployed bytecode offline, since LEZ has no deploy authority to bind it to. Demonstrated live at block 17862: a squatter registered and claimed, a wrong rebuild was refused and moved nothing, the right rebuild took the entry. The limits are written down in [design-positions.md](design-positions.md) rather than glossed |
+| 3 | Canonical vs third-party entries, distinguishable on chain; unauthorised canonical attempt rejected in the demo | **partial** (met on v0.2.4; the final text's deployer signature needs 0.3) | `claim_canonical` makes the canonical slot takeable by whoever reproduces the deployed bytecode offline, since LEZ has no deploy authority to bind it to. Demonstrated live at block 17862: a squatter registered and claimed, a wrong rebuild was refused and moved nothing, the right rebuild took the entry. The limits are written down in [design-positions.md](design-positions.md) rather than glossed |
 | 4 | Only the registering author may update | **met** | `require_writable_by`, test `only_the_author_may_write_and_freezing_is_one_way` |
 | 5 | Singleton global state with total registered | **met** | `GlobalAccount { total_entries, total_verified }` |
 | 6 | IDL JSON on Logos Storage, uploaded by tooling in one step, resolvable and parse-checked by clients | **met** | `tools/storage-upload.sh` runs a real Logos Storage node in-process and returns a real CID; the registry's own IDL is stored at `zDvZRwzmA4EqenwX34C9oqpDpp4jP5SM8k7y5kE7DccFe7xVDHNG` and that identifier is recorded on chain and reads back identical. `lez-registry idl` decodes it and parse-checks the resolved object |
@@ -71,15 +76,34 @@ than described as nearly done.
 
 Every item here is **open**, and none of it is a coding task.
 
+The final text's figures (the August draft asked for more):
+
 | Criterion | Note |
 |---|---|
-| 5 third-party tools integrating the SDK, independent of us | needs other people |
-| 75 stars | needs other people |
-| 100 registered programs by ≥40 distinct independent authors | needs other people |
+| 5 third-party Logos UI Modules integrating the SDK, independent of us and of each other, with genuine commit history | needs other people |
+| 50 registered programs on the official zone, by ≥20 distinct author accounts independent of us, pointing at genuinely deployed programs with parseable IDLs | needs other people |
 | 20 entries with an independently rebuildable source claim | needs other people |
-| Registrations spread over ≥2 months, ≥20 per month | needs **calendar time** — this cannot be compressed |
-| 30 Discord testimonials | needs other people |
-| 30 Twitter/X testimonials | needs other people |
+| Registrations spread over ≥2 months, ≥10 in each month | needs **calendar time** — this cannot be compressed |
+| 20 Discord testimonials describing actual use | needs other people |
+| 20 Twitter/X testimonials, same standard | needs other people |
+
+The draft's "75 stars" is gone.
+
+## Where the final text differs from the draft this tracker was written against
+
+- **Deployer vs third-party entries.** The final text asks that the deployer's
+  entry be *signed by the account that deployed the program*. On v0.2.4 no such
+  account exists, which is why row 3 binds the canonical slot to reproducing
+  the bytecode instead. On 0.3 a program is a header account the deployer holds
+  the key to, so the deployer entry becomes the entry that account signs — see
+  [lez-0.3-migration.md](lez-0.3-migration.md). Row 3 is **partial** until that
+  lands.
+- **"Locally verified".** A user who rebuilds the recorded source and gets a
+  matching bytecode may mark the program locally verified *for themselves*.
+  `lez-registry verify` performs the rebuild and comparison; recording the mark
+  per user, on the user's machine, is **open**.
+- **Cycle counts** are asked for in `cycle_bench` terms for register and update;
+  [CYCLES.md](../CYCLES.md) already reports executor cycles for both.
 
 The two-month requirement is the binding constraint. On-chain timestamps make it
 checkable directly from chain data, which is why the registration timestamp had
