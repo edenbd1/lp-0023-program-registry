@@ -19,6 +19,7 @@ pub use lez_registry_core::{
 use sha2::{Digest, Sha256};
 
 pub mod tx;
+pub mod v03;
 pub use tx::{
     build_register, build_update, AccountMeta, BuildError, BuiltTransaction, RegisterRequest, Role,
     UpdateRequest,
@@ -179,18 +180,7 @@ impl Client {
     /// written there. Empty and absent are the same answer and are returned as
     /// the same value.
     pub fn account_data(&self, id: &AccountId) -> Result<Option<Vec<u8>>> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0", "id": 1,
-            "method": "getAccount",
-            "params": [base58(id)],
-        });
-        let resp: serde_json::Value = ureq::post(&self.endpoint)
-            .set("content-type", "application/json")
-            .send_string(&body.to_string())
-            .map_err(|e| Error::Transport(e.to_string()))?
-            .into_string()
-            .map_err(|e| Error::Transport(e.to_string()))
-            .and_then(|t| serde_json::from_str(&t).map_err(|e| Error::Malformed(e.to_string())))?;
+        let resp = self.get_account_json(id)?;
 
         let Some(result) = resp.get("result") else {
             return Ok(None);
@@ -208,6 +198,22 @@ impl Client {
         bytes
             .ok_or_else(|| Error::Malformed("account data is not a byte array".into()))
             .map(Some)
+    }
+
+    /// The raw `getAccount` JSON-RPC response for `id`.
+    pub(crate) fn get_account_json(&self, id: &AccountId) -> Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "getAccount",
+            "params": [base58(id)],
+        });
+        ureq::post(&self.endpoint)
+            .set("content-type", "application/json")
+            .send_string(&body.to_string())
+            .map_err(|e| Error::Transport(e.to_string()))?
+            .into_string()
+            .map_err(|e| Error::Transport(e.to_string()))
+            .and_then(|t| serde_json::from_str(&t).map_err(|e| Error::Malformed(e.to_string())))
     }
 
     /// Resolve a program's canonical entry. One hash, one read, no index.

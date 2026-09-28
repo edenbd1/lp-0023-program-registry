@@ -51,6 +51,18 @@ be repointed after verification.
 re-checks a verified entry when the header's `image_id` differs from the one the
 verification recorded, instead of relying on elapsed time.
 
+## Already built and run against 0.3
+
+`sdk/src/v03.rs` reads a program's header on a 0.3 zone — `getAccount` returns
+one shard per program, and the header lives in the `program_loader` shard
+(`[0xFE; 32]`) as `{ image_id, first_segment, immutable }`. `lez-registry
+program-header <ACCOUNT> --image <HEX>` compares a rebuild's ImageID with it.
+Run on a local v0.3.0-rc1 standalone sequencer after deploying `ping_receiver.bin`
+through the 0.3 wallet's `program-loader deploy`: the header's `image_id`
+(`9956be7d…`) is exactly the ImageID `spel program-id` prints for that binary,
+and the deploy required the header account's own signature, which is the key
+the deployer keeps.
+
 ## What waits, and what does not
 
 Waits for SPEL on 0.3: the program itself, its IDL, the executor tests and the

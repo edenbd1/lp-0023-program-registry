@@ -98,6 +98,12 @@ lez-registry — addresses and build verification for the LEZ program registry
   local-verified
         List the programs you marked locally verified, and where the marks live.
 
+  program-header <PROGRAM_ACCOUNT> [--image <IMAGE_ID_HEX>] --endpoint <URL>
+        LEZ 0.3: read the program's header from chain — the ImageID the runtime
+        recomputed from its bytecode, and whether it is frozen. With --image
+        (the ImageID hex bytes `spel program-id` prints for your rebuild),
+        say whether your rebuild is the program running at that account.
+
   verify --explain
         Why a hash match is not proof of provenance.
 
@@ -208,6 +214,7 @@ fn main() -> ExitCode {
         "idl" => idl_cmd(&args),
         "verify" => verify(&args),
         "local-verified" => local_verified_cmd(),
+        "program-header" => program_header_cmd(&args),
         "register" => register_cmd(&args),
         "update" => update_cmd(&args),
         _ => usage(),
@@ -900,4 +907,49 @@ fn local_verified_cmd() -> ExitCode {
         );
     }
     ExitCode::SUCCESS
+}
+
+fn program_header_cmd(args: &[String]) -> ExitCode {
+    let Some(pid) = args
+        .get(1)
+        .and_then(|s| from_hex(s).or_else(|| lez_registry_sdk::from_base58(s)))
+    else {
+        eprintln!("program-header <PROGRAM_ACCOUNT> — hex or base58");
+        return ExitCode::FAILURE;
+    };
+    let Some(c) = client(args) else {
+        return ExitCode::FAILURE;
+    };
+    match c.program_header(&pid) {
+        Ok(Some(h)) => {
+            println!("image id  {}", hex(&h.image_id));
+            println!(
+                "header    {}",
+                if h.immutable {
+                    "immutable — can never be repointed, so a match cannot go stale"
+                } else {
+                    "mutable — the deployer may repoint it; re-check after any update"
+                }
+            );
+            match flag(args, "--image").and_then(|s| from_hex(s)) {
+                Some(img) if h.matches(&img) => {
+                    println!("match     your rebuild is the program running at this account");
+                    ExitCode::SUCCESS
+                }
+                Some(_) => {
+                    println!("MISMATCH  your rebuild is not the program running at this account");
+                    ExitCode::FAILURE
+                }
+                None => ExitCode::SUCCESS,
+            }
+        }
+        Ok(None) => {
+            println!("no program header at that account");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
