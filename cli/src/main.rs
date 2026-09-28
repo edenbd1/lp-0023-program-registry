@@ -14,6 +14,7 @@
 //! this tool shows is the address the program will insist on and the bytes it
 //! emits are the bytes the program decodes.
 
+mod local;
 use lez_registry_core as core_;
 use lez_registry_sdk::{
     build_register, build_update, BuiltTransaction, RegisterRequest, UpdateRequest,
@@ -85,6 +86,13 @@ lez-registry — addresses and build verification for the LEZ program registry
   verify <FILE> --expect <PROGRAM_ID_HEX>
         Does this bytecode's deployment digest match the one given? Necessary
         and not sufficient: see `verify --explain`.
+
+  verify <FILE> --expect <PROGRAM_ID_HEX> --mark
+        On a match, also record on THIS machine that you rebuilt the program
+        and it matched — locally verified, for you. Nothing goes on chain.
+
+  local-verified
+        List the programs you marked locally verified, and where the marks live.
 
   verify --explain
         Why a hash match is not proof of provenance.
@@ -195,6 +203,7 @@ fn main() -> ExitCode {
         "search" => search_cmd(&args),
         "idl" => idl_cmd(&args),
         "verify" => verify(&args),
+        "local-verified" => local_verified_cmd(),
         "register" => register_cmd(&args),
         "update" => update_cmd(&args),
         _ => usage(),
@@ -250,6 +259,28 @@ The second is not the first. This tool checks the second and says so."
         println!("match   {}", hex(&got));
         println!("  the bytecode in {path} is what is deployed.");
         println!("  this is necessary, not sufficient — run `verify --explain`.");
+        if args.iter().any(|a| a == "--mark") {
+            use sha2::Digest as _;
+            let mark = local::Mark {
+                program_id: hex(&expected),
+                digest: hex(&got),
+                file_sha256: sha2::Sha256::digest(&bytes)
+                    .iter()
+                    .map(|x| format!("{x:02x}"))
+                    .collect(),
+                marked_at: local::now(),
+            };
+            match local::add(&mark) {
+                Ok(at) => println!(
+                    "  marked locally verified, for you only, in {}",
+                    at.display()
+                ),
+                Err(e) => {
+                    eprintln!("  the match stands, but the mark could not be written: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
         ExitCode::SUCCESS
     } else {
         println!("MISMATCH");
@@ -547,6 +578,12 @@ fn lookup_cmd(args: &[String]) -> ExitCode {
                 println!("  offline build {}", cl.build.network_disabled);
             }
             println!("  registered block {}", e.registered_at.block);
+            if let Some(m) = local::mark_for(&hex(&pid)) {
+                println!(
+                    "  locally verified by you (unix {}) — your own rebuild, not a registry claim",
+                    m.marked_at
+                );
+            }
             ExitCode::SUCCESS
         }
         // Not an error: a derived address always exists as an address. What
@@ -834,5 +871,20 @@ fn update_cmd(args: &[String]) -> ExitCode {
     }
     println!();
     print_tx(&tx);
+    ExitCode::SUCCESS
+}
+
+fn local_verified_cmd() -> ExitCode {
+    let marks = local::load();
+    println!("{}", local::store_path().display());
+    if marks.is_empty() {
+        println!("  nothing marked yet — `verify <FILE> --expect <ID> --mark` after a rebuild");
+    }
+    for m in marks {
+        println!(
+            "  {}  rebuilt file sha256 {}  unix {}",
+            m.program_id, m.file_sha256, m.marked_at
+        );
+    }
     ExitCode::SUCCESS
 }
