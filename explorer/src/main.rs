@@ -208,7 +208,7 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    println!("LEZ Registry Explorer");
+    println!("Provenance — the LEZ program registry explorer");
     println!("  registry  {}", app.cfg.registry_hex);
     println!("  endpoint  {}", app.cfg.endpoint);
     match &app.cfg.storage {

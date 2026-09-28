@@ -62,7 +62,7 @@ fn from_hex(s: &str) -> Option<[u8; 32]> {
 fn usage() -> ExitCode {
     eprintln!(
         "\
-lez-registry — addresses and build verification for the LEZ program registry
+lez-registry — Provenance, the LEZ program registry: addresses and build verification
 
   deployment-digest <FILE>
         SHA256(len_le ‖ bytes) — what the DEPLOY TRANSACTION hashes to. Use it

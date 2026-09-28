@@ -1,4 +1,7 @@
-# LEZ Program Registry
+# Provenance — the LEZ program registry
+
+**Provenance** tells you what a program on the Logos Execution Zone is, who
+published it, and whether its bytecode was built from the source it names.
 
 A program ID on the Logos Execution Zone is an opaque 32 bytes. Nothing in it
 says what the program does, who wrote it, what its interface looks like, or

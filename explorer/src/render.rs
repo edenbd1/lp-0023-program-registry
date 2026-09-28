@@ -271,7 +271,7 @@ fn detail_href(e: &Entry) -> String {
 fn header(site: &Site, query: &str) -> String {
     format!(
         r#"<header class="site-header"><div class="wrap">
-  <a class="brand" href="/"><span class="mark">LEZ</span><span class="name">Registry Explorer</span><span class="sub">block explorer</span></a>
+  <a class="brand" href="/"><span class="mark">LEZ</span><span class="name">Provenance</span><span class="sub">verified programs</span></a>
   <div class="header-search"><form action="/search" method="get" role="search">
     <input type="search" name="q" value="{q}" placeholder="Search name, author, program id, state…" aria-label="Search the registry" autocomplete="off">
   </form></div>
@@ -380,7 +380,7 @@ fn head_meta(site: &Site, title: &str, meta: &Meta) -> String {
     format!(
         r#"<meta name="description" content="{desc}">
 {url_tags}<meta property="og:type" content="website">
-<meta property="og:site_name" content="LEZ Registry Explorer">
+<meta property="og:site_name" content="Provenance — verified programs on LEZ">
 <meta property="og:title" content="{og_title}">
 <meta property="og:description" content="{desc}">
 <meta name="twitter:card" content="summary">
@@ -572,7 +572,7 @@ pub fn list_page(site: &Site, entries: &[Entry], global: Option<&GlobalState>) -
         table = table(entries),
         legend = legend(),
     );
-    page(site, "LEZ Registry Explorer", "", &body)
+    page(site, "Provenance — verified programs on LEZ", "", &body)
 }
 
 // ---------------------------------------------------------------------------
@@ -599,7 +599,7 @@ pub fn search_page(site: &Site, query: &str, hits: &[Entry], total: usize) -> St
         q = esc(query),
         table = table(hits),
     );
-    page(site, "Search · LEZ Registry Explorer", query, &body)
+    page(site, "Search · Provenance", query, &body)
 }
 
 // ---------------------------------------------------------------------------
@@ -844,7 +844,7 @@ pub fn detail_page(site: &Site, e: &Entry, publisher: Option<&AccountId>, idl: &
     };
     page_meta(
         site,
-        &format!("{} {} · LEZ Registry Explorer", e.name, e.version),
+        &format!("{} {} · Provenance", e.name, e.version),
         "",
         &card,
         &body,
@@ -928,7 +928,7 @@ pub fn not_found(site: &Site, heading: &str, detail_html: &str) -> String {
     );
     page(
         site,
-        &format!("{heading} · LEZ Registry Explorer"),
+        &format!("{heading} · Provenance"),
         "",
         &body,
     )
@@ -1014,11 +1014,11 @@ cargo run --release --manifest-path explorer/Cargo.toml</pre>
     );
 
     let meta = Meta {
-        description: "How the LEZ Registry Explorer stays decentralised: read-only, no database, one-command self-host, an open-source search index, and a registry that works without the site — plus the explorer verifying its own build.".to_string(),
-        og_title: "How the LEZ Registry Explorer stays decentralised".to_string(),
+        description: "How Provenance stays decentralised: read-only, no database, one-command self-host, an open-source search index, and a registry that works without the site — plus the explorer verifying its own build.".to_string(),
+        og_title: "How Provenance stays decentralised".to_string(),
         canonical_path: "/about".to_string(),
     };
-    page_meta(site, "About · LEZ Registry Explorer", "", &meta, &body)
+    page_meta(site, "About · Provenance", "", &meta, &body)
 }
 
 /// The explorer verifying itself: its own repo, the commit the running binary was
@@ -1219,7 +1219,7 @@ pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[Account
             format!("{met} of 4 on-chain adoption criteria met.")
         },
     );
-    page(site, "Adoption · LEZ Registry Explorer", "", &body)
+    page(site, "Adoption · Provenance", "", &body)
 }
 
 fn sdk_b58(a: &AccountId) -> String {
@@ -1270,7 +1270,7 @@ cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
     );
     page(
         site,
-        "Register your program · LEZ Registry Explorer",
+        "Register your program · Provenance",
         "",
         &body,
     )
@@ -1328,7 +1328,7 @@ shasum -a 256 -c SHA256SUMS
         repo = esc(repo),
         digest = esc(site.self_digest),
     );
-    page(site, "Run it yourself · LEZ Registry Explorer", "", &body)
+    page(site, "Run it yourself · Provenance", "", &body)
 }
 
 #[cfg(test)]
