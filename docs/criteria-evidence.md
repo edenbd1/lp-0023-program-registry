@@ -100,8 +100,11 @@ The draft's "75 stars" is gone.
   lands.
 - **"Locally verified".** A user who rebuilds the recorded source and gets a
   matching bytecode may mark the program locally verified *for themselves*.
-  `lez-registry verify` performs the rebuild and comparison; recording the mark
-  per user, on the user's machine, is **open**.
+  **Met in the CLI**: `lez-registry verify <FILE> --expect <ID> --mark` records
+  the mark in the user's config directory on a match (and writes nothing on a
+  mismatch), `local-verified` lists the marks, and `lookup` shows a marked entry
+  as *locally verified by you — your own rebuild, not a registry claim*. The
+  Basecamp panel does not show it yet.
 - **Cycle counts** are asked for in `cycle_bench` terms for register and update;
   [CYCLES.md](../CYCLES.md) already reports executor cycles for both.
 
