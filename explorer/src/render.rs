@@ -1049,186 +1049,6 @@ docker run --rm --entrypoint sha256sum lez-registry-explorer \
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The content-id encoder is the one piece the IDL panel relies on that no
-    /// live entry currently exercises (none has an IDL pointer on chain). Pin it
-    /// against the two identifiers the core crate documents from a real Storage
-    /// node: decode with the core's own decoder, re-encode here, and require the
-    /// exact string back. A drift here would render a valid-looking `z…` that
-    /// fetches the wrong object.
-    #[test]
-    fn content_id_string_round_trips_known_identifiers() {
-        for cid in [
-            "zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ",
-            "zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55",
-        ] {
-            let bytes = core_::decode_content_id(cid).expect("known-good CID decodes");
-            assert_eq!(
-                content_id_string(&bytes),
-                cid,
-                "re-encoding must reproduce {cid}"
-            );
-        }
-    }
-
-    #[test]
-    fn fmt_millis_is_utc_civil() {
-        assert_eq!(fmt_millis(0), "1970-01-01 00:00 UTC");
-        // Unix second 1_000_000_000 = 2001-09-09 01:46:40 UTC.
-        assert_eq!(fmt_millis(1_000_000_000_000), "2001-09-09 01:46 UTC");
-    }
-
-    #[test]
-    fn a_third_party_detail_link_carries_the_publisher() {
-        let author: AccountId = [9u8; 32];
-        let mut e = Entry::new(
-            [3u8; 32],
-            Stamp {
-                block: 1,
-                millis: 0,
-            },
-            "x".into(),
-            "1".into(),
-            author,
-            Publisher::ThirdParty,
-        )
-        .unwrap();
-        e.publisher = Publisher::ThirdParty;
-        let href = detail_href(&e);
-        assert!(
-            href.contains("?publisher="),
-            "third-party link must resolve back to itself, not the canonical entry"
-        );
-    }
-
-    /// A verified, self-attested entry, used to check the social card reflects the
-    /// verification state rather than a generic title.
-    fn verified_entry() -> Entry {
-        let author: AccountId = [1u8; 32];
-        let mut e = Entry::new(
-            [7u8; 32],
-            Stamp {
-                block: 1,
-                millis: 0,
-            },
-            "widget".into(),
-            "1.2".into(),
-            author,
-            Publisher::Canonical,
-        )
-        .unwrap();
-        e.verification.state = VerificationState::Verified;
-        e.verification.attester = Some(author);
-        e
-    }
-
-    #[test]
-    fn a_permalink_carries_open_graph_and_an_absolute_canonical_when_the_origin_is_known() {
-        let registry = [0u8; 32];
-        let registry_hex = hex(&registry);
-        let site = Site {
-            registry,
-            registry_hex: &registry_hex,
-            endpoint: "https://testnet.lez.logos.co",
-            origin: Some("https://x.example".into()),
-            repo: "https://example/repo",
-            commit: "abc",
-            self_digest: "deadbeef",
-        };
-        let e = verified_entry();
-        let html = detail_page(&site, &e, None, &IdlView::None);
-        assert!(html.contains("og:title"), "an og:title is emitted");
-        assert!(
-            html.contains(r#"name="twitter:card" content="summary""#),
-            "a twitter summary card is declared"
-        );
-        // The card title reflects name, version and the verification state, so a
-        // shared link says what is known before it is clicked.
-        assert!(
-            html.contains("widget 1.2"),
-            "og:title carries name and version"
-        );
-        assert!(
-            html.contains("Verified"),
-            "og:title carries the verification state"
-        );
-        assert!(
-            html.contains(r#"<link rel="canonical" href="https://x.example/program/"#),
-            "canonical is absolute, built from the request origin"
-        );
-        assert!(
-            html.contains(r#"property="og:url" content="https://x.example/program/"#),
-            "og:url is absolute, built from the request origin"
-        );
-    }
-
-    #[test]
-    fn a_permalink_omits_absolute_urls_when_the_origin_is_unknown() {
-        let registry = [0u8; 32];
-        let registry_hex = hex(&registry);
-        let site = Site {
-            registry,
-            registry_hex: &registry_hex,
-            endpoint: "https://testnet.lez.logos.co",
-            origin: None,
-            repo: "https://example/repo",
-            commit: "abc",
-            self_digest: "deadbeef",
-        };
-        let e = verified_entry();
-        let html = detail_page(&site, &e, None, &IdlView::None);
-        assert!(
-            !html.contains(r#"rel="canonical""#),
-            "no canonical is invented without a known origin"
-        );
-        assert!(
-            !html.contains("og:url"),
-            "no og:url is invented without an origin"
-        );
-        assert!(
-            html.contains("og:title"),
-            "the card title is still emitted; only the absolute-URL tags are held back"
-        );
-    }
-
-    #[test]
-    fn about_states_the_four_principles_the_caveat_and_the_running_binary_digest() {
-        let registry = [0u8; 32];
-        let registry_hex = hex(&registry);
-        let site = Site {
-            registry,
-            registry_hex: &registry_hex,
-            endpoint: "https://testnet.lez.logos.co",
-            origin: Some("https://x.example".into()),
-            repo: "https://example/repo",
-            commit: "0123456789abcdef0123456789abcdef01234567",
-            self_digest: "cafebabecafebabe",
-        };
-        let html = about_page(&site, Some((6, 1, 6)));
-        assert!(html.contains("How this stays decentralised"));
-        assert_eq!(
-            html.matches(r#"class="principle">"#).count(),
-            4,
-            "exactly four principles are stated"
-        );
-        assert!(
-            html.contains("cafebabecafebabe"),
-            "the running binary's sha256 is shown so a rebuild can be compared"
-        );
-        assert!(
-            html.contains("0123456789abcdef"),
-            "the commit the binary was built from is shown"
-        );
-        assert!(
-            html.contains("Verified does not mean safe"),
-            "the safety caveat appears where states are explained"
-        );
-    }
-}
-
 // ---------------------------------------------------------------------------
 // adoption
 // ---------------------------------------------------------------------------
@@ -1430,4 +1250,184 @@ cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
         "",
         &body,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The content-id encoder is the one piece the IDL panel relies on that no
+    /// live entry currently exercises (none has an IDL pointer on chain). Pin it
+    /// against the two identifiers the core crate documents from a real Storage
+    /// node: decode with the core's own decoder, re-encode here, and require the
+    /// exact string back. A drift here would render a valid-looking `z…` that
+    /// fetches the wrong object.
+    #[test]
+    fn content_id_string_round_trips_known_identifiers() {
+        for cid in [
+            "zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ",
+            "zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55",
+        ] {
+            let bytes = core_::decode_content_id(cid).expect("known-good CID decodes");
+            assert_eq!(
+                content_id_string(&bytes),
+                cid,
+                "re-encoding must reproduce {cid}"
+            );
+        }
+    }
+
+    #[test]
+    fn fmt_millis_is_utc_civil() {
+        assert_eq!(fmt_millis(0), "1970-01-01 00:00 UTC");
+        // Unix second 1_000_000_000 = 2001-09-09 01:46:40 UTC.
+        assert_eq!(fmt_millis(1_000_000_000_000), "2001-09-09 01:46 UTC");
+    }
+
+    #[test]
+    fn a_third_party_detail_link_carries_the_publisher() {
+        let author: AccountId = [9u8; 32];
+        let mut e = Entry::new(
+            [3u8; 32],
+            Stamp {
+                block: 1,
+                millis: 0,
+            },
+            "x".into(),
+            "1".into(),
+            author,
+            Publisher::ThirdParty,
+        )
+        .unwrap();
+        e.publisher = Publisher::ThirdParty;
+        let href = detail_href(&e);
+        assert!(
+            href.contains("?publisher="),
+            "third-party link must resolve back to itself, not the canonical entry"
+        );
+    }
+
+    /// A verified, self-attested entry, used to check the social card reflects the
+    /// verification state rather than a generic title.
+    fn verified_entry() -> Entry {
+        let author: AccountId = [1u8; 32];
+        let mut e = Entry::new(
+            [7u8; 32],
+            Stamp {
+                block: 1,
+                millis: 0,
+            },
+            "widget".into(),
+            "1.2".into(),
+            author,
+            Publisher::Canonical,
+        )
+        .unwrap();
+        e.verification.state = VerificationState::Verified;
+        e.verification.attester = Some(author);
+        e
+    }
+
+    #[test]
+    fn a_permalink_carries_open_graph_and_an_absolute_canonical_when_the_origin_is_known() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: Some("https://x.example".into()),
+            repo: "https://example/repo",
+            commit: "abc",
+            self_digest: "deadbeef",
+        };
+        let e = verified_entry();
+        let html = detail_page(&site, &e, None, &IdlView::None);
+        assert!(html.contains("og:title"), "an og:title is emitted");
+        assert!(
+            html.contains(r#"name="twitter:card" content="summary""#),
+            "a twitter summary card is declared"
+        );
+        // The card title reflects name, version and the verification state, so a
+        // shared link says what is known before it is clicked.
+        assert!(
+            html.contains("widget 1.2"),
+            "og:title carries name and version"
+        );
+        assert!(
+            html.contains("Verified"),
+            "og:title carries the verification state"
+        );
+        assert!(
+            html.contains(r#"<link rel="canonical" href="https://x.example/program/"#),
+            "canonical is absolute, built from the request origin"
+        );
+        assert!(
+            html.contains(r#"property="og:url" content="https://x.example/program/"#),
+            "og:url is absolute, built from the request origin"
+        );
+    }
+
+    #[test]
+    fn a_permalink_omits_absolute_urls_when_the_origin_is_unknown() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: None,
+            repo: "https://example/repo",
+            commit: "abc",
+            self_digest: "deadbeef",
+        };
+        let e = verified_entry();
+        let html = detail_page(&site, &e, None, &IdlView::None);
+        assert!(
+            !html.contains(r#"rel="canonical""#),
+            "no canonical is invented without a known origin"
+        );
+        assert!(
+            !html.contains("og:url"),
+            "no og:url is invented without an origin"
+        );
+        assert!(
+            html.contains("og:title"),
+            "the card title is still emitted; only the absolute-URL tags are held back"
+        );
+    }
+
+    #[test]
+    fn about_states_the_four_principles_the_caveat_and_the_running_binary_digest() {
+        let registry = [0u8; 32];
+        let registry_hex = hex(&registry);
+        let site = Site {
+            registry,
+            registry_hex: &registry_hex,
+            endpoint: "https://testnet.lez.logos.co",
+            origin: Some("https://x.example".into()),
+            repo: "https://example/repo",
+            commit: "0123456789abcdef0123456789abcdef01234567",
+            self_digest: "cafebabecafebabe",
+        };
+        let html = about_page(&site, Some((6, 1, 6)));
+        assert!(html.contains("How this stays decentralised"));
+        assert_eq!(
+            html.matches(r#"class="principle">"#).count(),
+            4,
+            "exactly four principles are stated"
+        );
+        assert!(
+            html.contains("cafebabecafebabe"),
+            "the running binary's sha256 is shown so a rebuild can be compared"
+        );
+        assert!(
+            html.contains("0123456789abcdef"),
+            "the commit the binary was built from is shown"
+        );
+        assert!(
+            html.contains("Verified does not mean safe"),
+            "the safety caveat appears where states are explained"
+        );
+    }
 }
