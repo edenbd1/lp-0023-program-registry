@@ -926,12 +926,7 @@ pub fn not_found(site: &Site, heading: &str, detail_html: &str) -> String {
         h = esc(heading),
         d = detail_html,
     );
-    page(
-        site,
-        &format!("{heading} · Provenance"),
-        "",
-        &body,
-    )
+    page(site, &format!("{heading} · Provenance"), "", &body)
 }
 
 // ---------------------------------------------------------------------------
@@ -1268,12 +1263,7 @@ cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
 <p class="detail-sub">On testnet 0.3 a program is identified by its header account, and the entry that account signs is the one shown as the deployer's. The steps stay the same. <a href="/adoption">See how many programs are registered so far →</a></p>"#,
         reg = esc(site.registry_hex),
     );
-    page(
-        site,
-        "Register your program · Provenance",
-        "",
-        &body,
-    )
+    page(site, "Register your program · Provenance", "", &body)
 }
 
 // ---------------------------------------------------------------------------
