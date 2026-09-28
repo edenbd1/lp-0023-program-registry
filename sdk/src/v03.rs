@@ -145,9 +145,17 @@ mod tests {
     #[test]
     #[ignore = "needs a LEZ 0.3 sequencer"]
     fn a_live_header_reads_back() {
-        let ep = std::env::var("LEZ_V03_ENDPOINT").expect("LEZ_V03_ENDPOINT");
-        let pid = crate::from_base58(&std::env::var("LEZ_V03_PROGRAM").expect("LEZ_V03_PROGRAM"))
-            .expect("a base58 account id");
+        // Opt-in: the public zone is still v0.2.4, so the e2e job that runs
+        // every ignored test has no 0.3 sequencer to point this at. It runs
+        // only when both variables name one, and says so when it does not.
+        let (Ok(ep), Ok(prog)) = (
+            std::env::var("LEZ_V03_ENDPOINT"),
+            std::env::var("LEZ_V03_PROGRAM"),
+        ) else {
+            eprintln!("skipped: set LEZ_V03_ENDPOINT and LEZ_V03_PROGRAM to a 0.3 zone and a deployed program");
+            return;
+        };
+        let pid = crate::from_base58(&prog).expect("a base58 account id");
         let c = Client::new(ep, [0u8; 32]);
         let h = c.program_header(&pid).expect("answered").expect("a header");
         println!("image_id {:02x?} immutable {}", h.image_id, h.immutable);
