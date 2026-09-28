@@ -27,7 +27,7 @@ check() { # label tx expect_present
     if [ "$3" = yes ]; then
       printf '  OK   %-22s present\n' "$1"
     else
-      printf '  OK   %-22s returns null, as a never-deployed hash must\n' "$1"
+      printf '  OK   %-22s returns null, as asserted\n' "$1"
     fi
   else
     printf '  FAIL %-22s expected present=%s, got %s\n' "$1" "$3" "$present"
@@ -36,20 +36,25 @@ check() { # label tx expect_present
 }
 
 echo "registry on $RPC"
-check deploy         2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94 yes
-check build-17553    10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26 yes
-check build-17474    c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d yes
-check build-17531    d986fefad93efe52229fc9955de231fe980864ba1749a826209b082e26690e13 yes
-check claim-source   222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0 yes
-check record-rebuild 5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4 yes
-check refusal-17428  a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca yes
-check build-17428    0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 yes
+# Made before the public testnet reset of 2026-09-08, which erased them. They
+# are asserted ABSENT: a hash that resolved again would mean the reset did not
+# happen the way this file says. The registry itself was redeployed on
+# 2026-09-28 at the same deployment digest and repopulated; the digest,
+# global-state and canonical-entry checks below read that live state.
+check pre-reset-deploy        2ff83da81c8c5dfed840c37c95f3ada8b38e281243ffb533a2b74e2bbe7ebb94 no
+check pre-reset-build-17553   10d172fdb23c03fc475583c4bb3c286019f2be43b080900c5ff80cd1607baa26 no
+check pre-reset-build-17474   c1223c7240dc6d7a6d51b80ae3ab96d281e10c1556a54829e05a0079adac2a9d no
+check pre-reset-build-17531   d986fefad93efe52229fc9955de231fe980864ba1749a826209b082e26690e13 no
+check pre-reset-claim-source  222a7c1baa0e5fd56f37c1e5be3e414b14373a42073d49e20ac53c91161fcbc0 no
+check pre-reset-record-rebuild 5823f762239e7a6717ade9e8549ac0aa7b2a66e8a0b463de001bf7c7f3c966e4 no
+check pre-reset-refusal-17428 a4d2b10132dafd789615b24dc7be9ac21e7b2cccc53b78f326d6a667219ae1ca no
+check pre-reset-build-17428   0fe6f57a0dee2fb41adced5ba59c420bbc22aa425a6714f806aad4d087a92899 no
 # Every earlier build is a different program, not a stale link, so each stays
 # checkable. A row that stopped resolving would mean the chain lost it.
-check build-17342    447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604 yes
-check build-17358    d5ce586aa075ae0b7f87c6a0fc3db08b9bd500181b259a0eb4e3b765d7827b96 yes
-check build-17398    7b1bc3ca7748c0069ebbb90b52863cc9fa219a1155295f5ecf5046df97f9bf06 yes
-check build-17414    e4ef3af04bea59c969019fa2831278983709bd3d33a5163004a4fdd950d44f81 yes
+check pre-reset-build-17342   447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604 no
+check pre-reset-build-17358   d5ce586aa075ae0b7f87c6a0fc3db08b9bd500181b259a0eb4e3b765d7827b96 no
+check pre-reset-build-17398   7b1bc3ca7748c0069ebbb90b52863cc9fa219a1155295f5ecf5046df97f9bf06 no
+check pre-reset-build-17414   e4ef3af04bea59c969019fa2831278983709bd3d33a5163004a4fdd950d44f81 no
 
 # The deployment digest is not merely *like* the deploy transaction hash; it is
 # that hash. Recompute it from the binary in the tree and require equality, so a

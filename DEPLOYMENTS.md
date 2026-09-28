@@ -2,6 +2,14 @@
 
 Public LEZ testnet, `https://testnet.lez.logos.co`.
 
+> **The public testnet was reset on 2026-09-08**, which erased every transaction
+> made before it. The registry was redeployed on 2026-09-28 — same binary, so the
+> same deployment digest — and repopulated with `scripts/populate-demo.sh`, which
+> produced the six entries below again. The earlier register, claim and rebuild
+> transactions this file cited no longer exist; `scripts/verify-onchain.sh` now
+> asserts them absent and reads the live registry state instead. The prize
+> targets testnet 0.3, see [docs/lez-0.3-migration.md](docs/lez-0.3-migration.md).
+
 ## The live registry
 
 Built **sealed** — every build container had its network disabled.
@@ -10,7 +18,7 @@ Built **sealed** — every build container had its network disabled.
 |---|---|
 | ProgramId (RISC0 ImageID) | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
 | deployment digest | `b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953` |
-| deploy transaction | [`b31782fc…6bfb2953`](https://explorer.testnet.lez.logos.co/transaction/b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953) · block 17910 |
+| deploy transaction | [`b31782fc…6bfb2953`](https://explorer.testnet.lez.logos.co/transaction/b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953) · block 28756 (redeployed 2026-09-28; first at block 17910) |
 | global state | `75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z` |
 | canonical entry (itself) | `wkLxSjsYNRq24FKPzDSh1haT382zwMU5QFb2YuHRD4h` |
 
