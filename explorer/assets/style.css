@@ -653,3 +653,43 @@ dl.kv .v,
   /* Stack the state legend and any two-up key/value grids. */
   .legend-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------- adoption */
+.adoption-verdict { margin: 18px 0 14px; padding: 10px 14px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); font-weight: 500; }
+.adoption-verdict.met { color: var(--v-verified); border-color: var(--v-verified); background: var(--v-verified-bg); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 0 0 20px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+.kpi-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.kpi-label { font-size: var(--step-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.kpi-num { font: 600 1.6rem/1 var(--font-mono); color: var(--text); white-space: nowrap; }
+.kpi-head { flex-wrap: wrap; }
+.kpi-bar { height: 6px; margin: 12px 0 10px; border-radius: 3px; background: var(--surface-inset); overflow: hidden; }
+.kpi-bar span { display: block; height: 100%; background: var(--brand); border-radius: 3px; }
+.kpi.met .kpi-bar span { background: var(--v-verified); }
+.kpi.met .kpi-num { color: var(--v-verified); }
+.kpi-note { font-size: .82rem; color: var(--text-faint); }
+.panel-title { font-size: 1rem; margin: 0 0 6px; }
+.adoption-months, .panel { margin-bottom: 16px; }
+.months { position: relative; display: flex; align-items: flex-end; gap: 10px; height: 170px;
+  margin: 26px 0 30px; border-bottom: 1px solid var(--border); overflow: visible; }
+.month { position: relative; flex: 0 0 46px; height: 100%; display: flex; align-items: flex-end; }
+.month-bar { position: relative; width: 100%; background: var(--brand-bg); border: 1px solid var(--brand); border-bottom: 0; border-radius: 3px 3px 0 0; }
+.month.met .month-bar { background: var(--v-verified-bg); border-color: var(--v-verified); }
+.month-n { position: absolute; top: -20px; left: 0; right: 0; text-align: center; font: 600 .8rem var(--font-mono); }
+.month-l { position: absolute; bottom: -22px; left: 0; right: 0; text-align: center; font-size: .72rem; color: var(--text-faint); white-space: nowrap; }
+.months-line { position: absolute; left: 0; right: 0; bottom: var(--line); border-top: 1px dashed var(--v-claimed); pointer-events: none; }
+.months-line::after { content: attr(title); position: absolute; right: 0; top: -18px; font-size: .7rem; color: var(--v-claimed); }
+ul.plain { margin: 6px 0 10px; padding-left: 18px; color: var(--text-dim); }
+ul.plain li { margin: 4px 0; }
+
+/* ---------------------------------------------------------- mobile table */
+@media (max-width: 720px) {
+  .table-card table, .table-card thead, .table-card tbody, .table-card tr, .table-card td { display: block; width: 100%; }
+  .table-card thead { display: none; }
+  .table-card tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-card td { padding: 2px 0; border: 0; }
+  .table-card td.cell-name { font-size: 1rem; font-weight: 600; }
+}
+.panel > p, .panel > ul.plain, .panel > .months { margin-left: 18px; margin-right: 18px; }
+.panel > p:last-child { margin-bottom: 16px; }

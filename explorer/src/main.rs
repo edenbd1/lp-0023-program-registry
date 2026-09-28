@@ -18,6 +18,7 @@
 //! an IDL — and when no gateway is configured the content id is still shown, so
 //! the on-chain metadata never depends on it.
 
+mod adoption;
 mod render;
 
 use lez_registry_core::{AccountId, Entry, GlobalState, ProgramId, Publisher, VerificationState};
@@ -78,6 +79,9 @@ struct Config {
     endpoint: String,
     storage: Option<String>,
     cache_ttl: Option<Duration>,
+    /// Accounts of the submitting team, excluded from the independent-author
+    /// count on /adoption. Passed with --team, repeatable.
+    team: Vec<AccountId>,
 }
 
 impl Config {
@@ -164,6 +168,11 @@ fn main() -> std::process::ExitCode {
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
     let storage = flag(&args, "--storage-gateway");
+    let team: Vec<AccountId> = args
+        .windows(2)
+        .filter(|w| w[0] == "--team")
+        .filter_map(|w| from_hex(&w[1]).or_else(|| sdk::from_base58(&w[1])))
+        .collect();
     let cache_ttl = if args.iter().any(|a| a == "--no-cache") {
         None
     } else {
@@ -181,6 +190,7 @@ fn main() -> std::process::ExitCode {
             endpoint,
             storage,
             cache_ttl,
+            team,
         },
         identity: Identity {
             repo: EXPLORER_REPO,
@@ -363,6 +373,21 @@ fn handle(mut stream: TcpStream, app: &App) {
             Err(_) => None,
         };
         respond_html(&mut stream, "200 OK", &render::about_page(&site, stats));
+        return;
+    }
+
+    if path == "/adoption" {
+        match app.snapshot() {
+            Ok((entries, _)) => {
+                let a = adoption::Adoption::from_entries(&entries, &app.cfg.team);
+                respond_html(&mut stream, "200 OK", &render::adoption_page(&site, &a, &app.cfg.team));
+            }
+            Err(e) => respond_html(
+                &mut stream,
+                "502 Bad Gateway",
+                &render::not_found(&site, "The chain did not answer", &format!("Adoption is counted from the chain, and the sequencer did not answer: {}.", esc_txt(&e))),
+            ),
+        }
         return;
     }
 
@@ -758,6 +783,7 @@ OPTIONS
   --storage-gateway <URL>   Logos Storage gateway to resolve IDL content ids (optional)
   --cache-ttl <SECONDS>     in-memory walk cache TTL (default: 10)
   --no-cache                read the chain on every request
+  --team <ACCOUNT>          a submitting-team account, excluded from /adoption's independent-author count (repeatable)
   -h, --help                this message
 
 ROUTES

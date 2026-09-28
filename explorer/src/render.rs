@@ -275,6 +275,7 @@ fn header(site: &Site, query: &str) -> String {
   <div class="header-search"><form action="/search" method="get" role="search">
     <input type="search" name="q" value="{q}" placeholder="Search name, author, program id, state…" aria-label="Search the registry" autocomplete="off">
   </form></div>
+  <a class="nav-link" href="/adoption">Adoption</a>
   <a class="nav-link" href="/about">About</a>
   <button id="theme-toggle" class="theme-toggle" type="button">◑ dark</button>
 </div></header>
@@ -1225,4 +1226,116 @@ mod tests {
             "the safety caveat appears where states are explained"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// adoption
+// ---------------------------------------------------------------------------
+
+fn meter(label: &str, have: usize, want: usize, note: &str) -> String {
+    let pct = if want == 0 { 100 } else { (have * 100 / want).min(100) };
+    let done = have >= want;
+    format!(
+        r#"<div class="kpi{cls}">
+  <div class="kpi-head"><span class="kpi-label">{label}</span><span class="kpi-num">{have}<span class="faint"> / {want}</span></span></div>
+  <div class="kpi-bar" role="progressbar" aria-valuenow="{have}" aria-valuemin="0" aria-valuemax="{want}"><span style="width:{pct}%"></span></div>
+  <div class="kpi-note">{note}</div>
+</div>"#,
+        cls = if done { " met" } else { "" },
+        label = esc(label),
+        have = have,
+        want = want,
+        pct = pct,
+        note = note,
+    )
+}
+
+pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[AccountId]) -> String {
+    use crate::adoption::*;
+    let months = if a.per_month.is_empty() {
+        r#"<p class="dim">No dated registrations yet.</p>"#.to_string()
+    } else {
+        let max = a.per_month.values().copied().max().unwrap_or(1).max(TARGET_PER_MONTH);
+        let bars: String = a
+            .per_month
+            .iter()
+            .map(|(&(y, m), &n)| {
+                format!(
+                    r#"<div class="month{cls}"><span class="month-bar" style="height:{h}%"><b class="month-n">{n}</b></span><span class="month-l">{y}-{m:02}</span></div>"#,
+                    cls = if n >= TARGET_PER_MONTH { " met" } else { "" },
+                    h = (n * 100 / max).max(2),
+                )
+            })
+            .collect();
+        format!(
+            r#"<div class="months" style="--line:{line}%">{bars}<span class="months-line" title="{t} a month"></span></div>"#,
+            line = TARGET_PER_MONTH * 100 / max,
+            t = TARGET_PER_MONTH,
+        )
+    };
+    let team_line = if team.is_empty() {
+        "No team accounts declared on this instance, so every author counts as independent. The operator passes them with <span class=\"mono\">--team</span>.".to_string()
+    } else {
+        format!(
+            "Excluded as the submitting team: {}.",
+            team.iter()
+                .map(|t| format!("<span class=\"mono\">{}</span>", esc(&short_b58(&sdk_b58(t)))))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let body = format!(
+        r#"<span class="eyebrow">LP-0023 adoption, counted from the chain</span>
+<h1 class="page-title">Adoption</h1>
+<p class="detail-sub">Every figure below is computed on this page load from the entries the registry holds and the sequencer's timestamp on each. Nothing here is typed in by a maintainer, and a second instance pointed at the same registry shows the same numbers.</p>
+<p class="adoption-verdict{vcls}">{verdict}</p>
+<div class="kpis">
+{programs}
+{authors}
+{verified}
+{run}
+</div>
+<section class="panel adoption-months">
+  <h2 class="panel-title">Registrations per month (UTC)</h2>
+  <p class="dim">The criterion is sustained activity: at least {per} new registrations in each of at least {mn} consecutive months. The line marks {per}.</p>
+  {months}
+  {undated}
+</section>
+<section class="panel">
+  <h2 class="panel-title">Not decidable from the chain</h2>
+  <ul class="plain">
+    <li><strong>5 third-party Logos UI Modules</strong> integrating the SDK, independent of the team and of each other.</li>
+    <li><strong>20 Discord and 20 Twitter/X testimonials</strong> describing what the person used the registry for.</li>
+  </ul>
+  <p class="dim">These are gathered and linked in the submission, not counted here. {team}</p>
+</section>"#,
+        programs = meter("Registered programs", a.programs, TARGET_PROGRAMS, "distinct program ids with an entry"),
+        authors = meter("Independent authors", a.independent_authors, TARGET_AUTHORS, &format!("{} distinct author{} in all", a.authors, if a.authors == 1 { "" } else { "s" })),
+        verified = meter(
+            "Verified source claims",
+            a.verified_independent + a.verified_self,
+            TARGET_VERIFIED,
+            &format!("{} rebuilt by another party, {} by their own author; {} entries carry a claim", a.verified_independent, a.verified_self, a.with_claim),
+        ),
+        run = meter("Consecutive months at pace", a.best_run, TARGET_MONTHS, &format!("months with at least {} registrations", TARGET_PER_MONTH)),
+        per = TARGET_PER_MONTH,
+        mn = TARGET_MONTHS,
+        months = months,
+        undated = if a.undated > 0 { format!("<p class=\"faint\">{} entries carry no timestamp and are not counted in a month.</p>", a.undated) } else { String::new() },
+        team = team_line,
+        vcls = if a.on_chain_met() { " met" } else { "" },
+        verdict = if a.on_chain_met() {
+            "Every on-chain adoption criterion is met.".to_string()
+        } else {
+            let met = [a.programs >= TARGET_PROGRAMS, a.independent_authors >= TARGET_AUTHORS,
+                       a.verified_independent + a.verified_self >= TARGET_VERIFIED, a.best_run >= TARGET_MONTHS]
+                .iter().filter(|x| **x).count();
+            format!("{met} of 4 on-chain adoption criteria met.")
+        },
+    );
+    page(site, "Adoption · LEZ Registry Explorer", "", &body)
+}
+
+fn sdk_b58(a: &AccountId) -> String {
+    base58btc(a)
 }
