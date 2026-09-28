@@ -1233,7 +1233,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 fn meter(label: &str, have: usize, want: usize, note: &str) -> String {
-    let pct = if want == 0 { 100 } else { (have * 100 / want).min(100) };
+    let pct = (have * 100).checked_div(want).map_or(100, |p| p.min(100));
     let done = have >= want;
     format!(
         r#"<div class="kpi{cls}">
@@ -1255,7 +1255,13 @@ pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[Account
     let months = if a.per_month.is_empty() {
         r#"<p class="dim">No dated registrations yet.</p>"#.to_string()
     } else {
-        let max = a.per_month.values().copied().max().unwrap_or(1).max(TARGET_PER_MONTH);
+        let max = a
+            .per_month
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(1)
+            .max(TARGET_PER_MONTH);
         let bars: String = a
             .per_month
             .iter()
@@ -1279,7 +1285,10 @@ pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[Account
         format!(
             "Excluded as the submitting team: {}.",
             team.iter()
-                .map(|t| format!("<span class=\"mono\">{}</span>", esc(&short_b58(&sdk_b58(t)))))
+                .map(|t| format!(
+                    "<span class=\"mono\">{}</span>",
+                    esc(&short_b58(&sdk_b58(t)))
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -1309,27 +1318,59 @@ pub fn adoption_page(site: &Site, a: &crate::adoption::Adoption, team: &[Account
   </ul>
   <p class="dim">These are gathered and linked in the submission, not counted here. {team}</p>
 </section>"#,
-        programs = meter("Registered programs", a.programs, TARGET_PROGRAMS, "distinct program ids with an entry"),
-        authors = meter("Independent authors", a.independent_authors, TARGET_AUTHORS, &format!("{} distinct author{} in all", a.authors, if a.authors == 1 { "" } else { "s" })),
+        programs = meter(
+            "Registered programs",
+            a.programs,
+            TARGET_PROGRAMS,
+            "distinct program ids with an entry"
+        ),
+        authors = meter(
+            "Independent authors",
+            a.independent_authors,
+            TARGET_AUTHORS,
+            &format!(
+                "{} distinct author{} in all",
+                a.authors,
+                if a.authors == 1 { "" } else { "s" }
+            )
+        ),
         verified = meter(
             "Verified source claims",
             a.verified_independent + a.verified_self,
             TARGET_VERIFIED,
-            &format!("{} rebuilt by another party, {} by their own author; {} entries carry a claim", a.verified_independent, a.verified_self, a.with_claim),
+            &format!(
+                "{} rebuilt by another party, {} by their own author; {} entries carry a claim",
+                a.verified_independent, a.verified_self, a.with_claim
+            ),
         ),
-        run = meter("Consecutive months at pace", a.best_run, TARGET_MONTHS, &format!("months with at least {} registrations", TARGET_PER_MONTH)),
+        run = meter(
+            "Consecutive months at pace",
+            a.best_run,
+            TARGET_MONTHS,
+            &format!("months with at least {} registrations", TARGET_PER_MONTH)
+        ),
         per = TARGET_PER_MONTH,
         mn = TARGET_MONTHS,
         months = months,
-        undated = if a.undated > 0 { format!("<p class=\"faint\">{} entries carry no timestamp and are not counted in a month.</p>", a.undated) } else { String::new() },
+        undated = if a.undated > 0 {
+            format!("<p class=\"faint\">{} entries carry no timestamp and are not counted in a month.</p>", a.undated)
+        } else {
+            String::new()
+        },
         team = team_line,
         vcls = if a.on_chain_met() { " met" } else { "" },
         verdict = if a.on_chain_met() {
             "Every on-chain adoption criterion is met.".to_string()
         } else {
-            let met = [a.programs >= TARGET_PROGRAMS, a.independent_authors >= TARGET_AUTHORS,
-                       a.verified_independent + a.verified_self >= TARGET_VERIFIED, a.best_run >= TARGET_MONTHS]
-                .iter().filter(|x| **x).count();
+            let met = [
+                a.programs >= TARGET_PROGRAMS,
+                a.independent_authors >= TARGET_AUTHORS,
+                a.verified_independent + a.verified_self >= TARGET_VERIFIED,
+                a.best_run >= TARGET_MONTHS,
+            ]
+            .iter()
+            .filter(|x| **x)
+            .count();
             format!("{met} of 4 on-chain adoption criteria met.")
         },
     );

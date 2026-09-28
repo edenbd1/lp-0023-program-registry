@@ -380,12 +380,23 @@ fn handle(mut stream: TcpStream, app: &App) {
         match app.snapshot() {
             Ok((entries, _)) => {
                 let a = adoption::Adoption::from_entries(&entries, &app.cfg.team);
-                respond_html(&mut stream, "200 OK", &render::adoption_page(&site, &a, &app.cfg.team));
+                respond_html(
+                    &mut stream,
+                    "200 OK",
+                    &render::adoption_page(&site, &a, &app.cfg.team),
+                );
             }
             Err(e) => respond_html(
                 &mut stream,
                 "502 Bad Gateway",
-                &render::not_found(&site, "The chain did not answer", &format!("Adoption is counted from the chain, and the sequencer did not answer: {}.", esc_txt(&e))),
+                &render::not_found(
+                    &site,
+                    "The chain did not answer",
+                    &format!(
+                        "Adoption is counted from the chain, and the sequencer did not answer: {}.",
+                        esc_txt(&e)
+                    ),
+                ),
             ),
         }
         return;

@@ -57,7 +57,9 @@ impl Adoption {
                 undated += 1;
                 continue;
             }
-            *per_month.entry(year_month(e.registered_at.millis)).or_insert(0) += 1;
+            *per_month
+                .entry(year_month(e.registered_at.millis))
+                .or_insert(0) += 1;
         }
         let verified_self = entries
             .iter()
@@ -73,7 +75,10 @@ impl Adoption {
             independent_authors: independent,
             verified_independent: verified_all - verified_self,
             verified_self,
-            with_claim: entries.iter().filter(|e| e.verification.claim.is_some()).count(),
+            with_claim: entries
+                .iter()
+                .filter(|e| e.verification.claim.is_some())
+                .count(),
             best_run: best_run(&per_month, TARGET_PER_MONTH),
             per_month,
             undated,
@@ -124,7 +129,11 @@ pub fn best_run(per_month: &BTreeMap<(i64, u32), usize>, min: usize) -> usize {
 }
 
 fn next_month((y, m): (i64, u32)) -> (i64, u32) {
-    if m == 12 { (y + 1, 1) } else { (y, m + 1) }
+    if m == 12 {
+        (y + 1, 1)
+    } else {
+        (y, m + 1)
+    }
 }
 
 #[cfg(test)]
@@ -138,7 +147,11 @@ mod tests {
     #[test]
     fn months_are_utc_calendar_months() {
         assert_eq!(year_month(SEP1), (2026, 9));
-        assert_eq!(year_month(SEP1 - 1), (2026, 8), "the last millisecond of August");
+        assert_eq!(
+            year_month(SEP1 - 1),
+            (2026, 8),
+            "the last millisecond of August"
+        );
         assert_eq!(year_month(SEP1 + 30 * DAY), (2026, 10));
         assert_eq!(year_month(0), (1970, 1));
     }
@@ -147,9 +160,24 @@ mod tests {
     fn a_run_needs_consecutive_months_each_over_the_threshold() {
         let m = |v: &[((i64, u32), usize)]| v.iter().cloned().collect::<BTreeMap<_, _>>();
         assert_eq!(best_run(&m(&[((2026, 10), 12), ((2026, 11), 10)]), 10), 2);
-        assert_eq!(best_run(&m(&[((2026, 10), 12), ((2026, 11), 9)]), 10), 1, "one month short");
-        assert_eq!(best_run(&m(&[((2026, 10), 30), ((2026, 12), 30)]), 10), 1, "a gap breaks the run");
-        assert_eq!(best_run(&m(&[((2026, 12), 10), ((2027, 1), 10), ((2027, 2), 10)]), 10), 3, "across a year boundary");
+        assert_eq!(
+            best_run(&m(&[((2026, 10), 12), ((2026, 11), 9)]), 10),
+            1,
+            "one month short"
+        );
+        assert_eq!(
+            best_run(&m(&[((2026, 10), 30), ((2026, 12), 30)]), 10),
+            1,
+            "a gap breaks the run"
+        );
+        assert_eq!(
+            best_run(
+                &m(&[((2026, 12), 10), ((2027, 1), 10), ((2027, 2), 10)]),
+                10
+            ),
+            3,
+            "across a year boundary"
+        );
         assert_eq!(best_run(&BTreeMap::new(), 10), 0);
     }
 }
