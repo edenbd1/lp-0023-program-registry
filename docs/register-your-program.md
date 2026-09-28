@@ -44,7 +44,7 @@ reproduce your bytecode. Anyone can then rebuild it and check the match; a user
 whose rebuild matches can mark your program *locally verified* for themselves:
 
 ```bash
-cli/target/release/lez-registry verify <rebuilt.bin> --expect <PROGRAM_ID_HEX> --mark
+cli/target/release/lez-registry verify <rebuilt.bin> --expect <DEPLOYMENT_DIGEST> --mark --program <PROGRAM_ID_HEX>
 ```
 
 A matching hash is necessary, not sufficient — `lez-registry verify --explain`

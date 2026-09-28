@@ -100,7 +100,7 @@ The draft's "75 stars" is gone.
   lands.
 - **"Locally verified".** A user who rebuilds the recorded source and gets a
   matching bytecode may mark the program locally verified *for themselves*.
-  **Met in the CLI**: `lez-registry verify <FILE> --expect <ID> --mark` records
+  **Met in the CLI**: `lez-registry verify <FILE> --expect <DIGEST> --mark --program <ID>` records
   the mark in the user's config directory on a match (and writes nothing on a
   mismatch), `local-verified` lists the marks, and `lookup` shows a marked entry
   as *locally verified by you — your own rebuild, not a registry claim*. The

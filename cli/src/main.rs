@@ -87,9 +87,13 @@ lez-registry — addresses and build verification for the LEZ program registry
         Does this bytecode's deployment digest match the one given? Necessary
         and not sufficient: see `verify --explain`.
 
-  verify <FILE> --expect <PROGRAM_ID_HEX> --mark
+  verify <FILE> --expect <DIGEST_HEX> --mark --program <PROGRAM_ID_HEX>
         On a match, also record on THIS machine that you rebuilt the program
         and it matched — locally verified, for you. Nothing goes on chain.
+        --program names the program the mark is for (its id, which `lookup`
+        keys on); --expect stays the deployment digest the file is checked
+        against. The two are different numbers, and a mark keyed on the
+        digest would never be found again.
 
   local-verified
         List the programs you marked locally verified, and where the marks live.
@@ -261,8 +265,17 @@ The second is not the first. This tool checks the second and says so."
         println!("  this is necessary, not sufficient — run `verify --explain`.");
         if args.iter().any(|a| a == "--mark") {
             use sha2::Digest as _;
+            let Some(program) = args
+                .iter()
+                .position(|a| a == "--program")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|s| from_hex(s))
+            else {
+                eprintln!("  --mark needs --program <PROGRAM_ID_HEX>: the id the mark is for");
+                return ExitCode::FAILURE;
+            };
             let mark = local::Mark {
-                program_id: hex(&expected),
+                program_id: hex(&program),
                 digest: hex(&got),
                 file_sha256: sha2::Sha256::digest(&bytes)
                     .iter()
