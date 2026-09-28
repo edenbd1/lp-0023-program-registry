@@ -277,6 +277,7 @@ fn header(site: &Site, query: &str) -> String {
   </form></div>
   <a class="nav-link" href="/register">Register</a>
   <a class="nav-link" href="/adoption">Adoption</a>
+  <a class="nav-link" href="/run">Run locally</a>
   <a class="nav-link" href="/about">About</a>
   <button id="theme-toggle" class="theme-toggle" type="button">◑ dark</button>
 </div></header>
@@ -1273,6 +1274,61 @@ cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
         "",
         &body,
     )
+}
+
+// ---------------------------------------------------------------------------
+// run it yourself
+// ---------------------------------------------------------------------------
+
+pub fn run_page(site: &Site) -> String {
+    let repo = site.repo.trim_end_matches('/');
+    let body = format!(
+        r#"<span class="eyebrow">No trust in this site required</span>
+<h1 class="page-title">Run it yourself</h1>
+<p class="detail-sub">This site is a convenience. Everything it shows is read from the chain, and the same software runs on your own machine in one command — so you can check any page here against your own copy, or never use this site at all.</p>
+<div class="principles">
+  <div class="principle">
+    <span class="pn">A</span>
+    <h3>Docker — one command.</h3>
+    <p>A sealed, reproducible build: the same commit gives the same binary for everyone.</p>
+    <pre class="code">git clone {repo}
+cd lp-0023-program-registry
+docker build -f explorer/Dockerfile -t lez-registry-explorer .
+docker run --rm -p 8080:8080 lez-registry-explorer
+<span class="c"># open http://127.0.0.1:8080</span></pre>
+  </div>
+  <div class="principle">
+    <span class="pn">B</span>
+    <h3>From source.</h3>
+    <p>Only a Rust toolchain. <a href="{repo}/archive/refs/heads/main.zip">Download the source as a zip</a> or clone it.</p>
+    <pre class="code">cargo run --release --manifest-path explorer/Cargo.toml
+<span class="c"># open http://127.0.0.1:8080</span></pre>
+  </div>
+  <div class="principle">
+    <span class="pn">C</span>
+    <h3>The local package.</h3>
+    <p>The CLI, this explorer and the indexer in one archive, with a checksum for every file and a script that starts the explorer on localhost.</p>
+    <pre class="code">scripts/package-local.sh            <span class="c"># → dist/lez-registry-&lt;os&gt;-&lt;arch&gt;.tar.gz</span>
+tar xzf dist/lez-registry-*.tar.gz && cd lez-registry-*
+shasum -a 256 -c SHA256SUMS
+./run.sh                            <span class="c"># → http://127.0.0.1:8080</span></pre>
+  </div>
+  <div class="principle">
+    <span class="pn">D</span>
+    <h3>No site at all.</h3>
+    <p>Resolving a program never needed a website: one hash and one account read, from the command line.</p>
+    <pre class="code">./bin/lez-registry lookup &lt;PROGRAM_ID&gt;
+./bin/lez-registry search &lt;name or author&gt;</pre>
+  </div>
+</div>
+<section class="panel" style="margin-top:22px">
+  <h2 class="panel-title">Is this page the one you would build?</h2>
+  <p class="dim">The binary serving you right now has sha256 <span class="mono">{digest}</span>. Build the same commit with the pinned image and compare — <a href="/about#self-verify">step by step</a>.</p>
+</section>"#,
+        repo = esc(repo),
+        digest = esc(site.self_digest),
+    );
+    page(site, "Run it yourself · LEZ Registry Explorer", "", &body)
 }
 
 #[cfg(test)]

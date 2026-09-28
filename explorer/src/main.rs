@@ -376,6 +376,11 @@ fn handle(mut stream: TcpStream, app: &App) {
         return;
     }
 
+    if path == "/run" {
+        respond_html(&mut stream, "200 OK", &render::run_page(&site));
+        return;
+    }
+
     if path == "/register" {
         respond_html(&mut stream, "200 OK", &render::register_page(&site));
         return;
