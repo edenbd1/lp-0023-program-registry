@@ -1,639 +1,445 @@
-// The LEZ program registry, on chain.
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//
+// The Provenance registry, on LEZ v0.3.
 //
 // WHAT THIS PROGRAM IS FOR
 //
-// A LEZ program is identified by an opaque 32-byte id. Nothing in it says what
-// the program does, who wrote it, what its interface is, or whether the source
-// you are reading is the source that is running. This program is where those
-// answers live, so that a wallet showing a transaction, an explorer decoding
-// one, or a developer choosing a dependency can all ask the same place.
+// A LEZ program is identified by an opaque 32-byte account id. Nothing in it
+// says what the program does, who wrote it, what its interface is, or whether
+// the source you are reading is the source that is running. This program is
+// where those answers live, so that a wallet showing a transaction, an explorer
+// decoding one, or a developer choosing a dependency can all ask the same place.
+//
+// HOW v0.3 SHAPES IT
+//
+// A v0.3 guest runs twice per effect. `plan` sees the instruction and the
+// account ids with their `is_authorized` bits, never account contents, and
+// emits effects. `apply` sees one effect and one shard. So every rule that
+// needs data is checked in `apply`, every rule about who signed is checked in
+// `plan`, and where two shards must agree (the directory index and the global
+// counter) the instruction names the value and each apply refuses unless its
+// own shard agrees.
+//
+// Two facts are read from other programs' shards with read-only effects:
+// the program's header in the `program_loader` shard, which is how the
+// registry checks the recorded ImageID and frozen flag on chain, and nothing
+// else. Time comes from the transaction's validity windows, which the runtime
+// enforces against the block that includes it.
 //
 // WHY THE RULES ARE NOT WRITTEN HERE
 //
-// Every check below delegates to `lez-registry-core`, the same crate the CLI
-// and the SDK link. Address derivation and the meaning of "verified" are
-// written once. If they were written twice they would agree until the day they
-// did not, and that day would be the day a user trusted a wrong answer.
-//
-// WHAT IS DELIBERATELY ABSENT
-//
-// No curation, no ranking, no trust score. The registry records what authors
-// assert plus what is objectively checkable, and refuses to decide which
-// programs are good — that is a judgement, and a judgement stored on chain by
-// this program would be mistaken for a fact.
+// Every check about an entry delegates to `lez-registry-core`, the same crate
+// the CLI and the SDK link. The instruction enum lives there too, so a
+// transaction the SDK builds is by construction one this program decodes.
 
-// SPEL instructions take accounts and arguments as one flat parameter list, so
-// `too_many_arguments` fires on every non-trivial instruction; splitting them
-// into structs to satisfy the lint would fight the macro rather than help a
-// reader. `redundant_clone` fires inside the macro's own expansion, where there
-// is nothing here to change.
-#![allow(
-    clippy::too_many_arguments,
-    clippy::redundant_clone,
-    clippy::cloned_ref_to_slice_refs
-)]
-#![no_main]
+use borsh::{BorshDeserialize, BorshSerialize};
+use lee_core::{
+    account::AccountId,
+    program::{
+        run_program, AccountMeta, BlockValidityWindow, PdaSeed, Plan, PlanInput, ProgramHeader,
+        TimestampValidityWindow, PROGRAM_LOADER_ACCOUNT_ID,
+    },
+};
+use lez_registry_core::{
+    self as core_,
+    instruction::{EntryKey, HeaderView, Instruction, STAMP_BLOCK_WINDOW, STAMP_MILLIS_WINDOW},
+    DirectorySlot, Entry, GlobalState, ImageId, RegistryError, SourceClaim, Stamp,
+    Verification,
+};
 
-use spel_framework::prelude::*;
-
-risc0_zkvm::guest::entry!(main);
-
-const E_BAD_ENTRY: u32 = 9001;
-const E_NOT_ANCHORED: u32 = 9002;
-const E_NOT_AUTHOR: u32 = 9003;
-const E_IMMUTABLE: u32 = 9004;
-const E_SEED_MISMATCH: u32 = 9005;
-const E_BAD_CLAIM: u32 = 9006;
-const E_NOT_VERIFIED: u32 = 9007;
-const E_ALREADY_REGISTERED: u32 = 9008;
-const E_BAD_CLOCK: u32 = 9009;
-
-/// The LEZ clock program, pinned by ImageID.
-///
-/// A zkVM guest has no clock, and the obvious workaround — let the client pass a
-/// timestamp — makes every date in this registry a number the registering party
-/// chose. Since the adoption story a registry tells is entirely about *when*
-/// things were registered, that is not a small hole.
-///
-/// LEZ maintains clock accounts at fixed addresses, written by the sequencer.
-/// This program reads one as an input and refuses it unless the account is owned
-/// by exactly this program id — verified against
-/// `artifacts/lez/programs/clock.bin` at v0.2.4 and against the live account's
-/// own `program_owner`. Without the pin, a caller could supply an account owned
-/// by a program they wrote and choose the time after all.
-const CLOCK_PROGRAM_ID: [u32; 8] = [
-    96_247_601,
-    2_082_502_477,
-    822_865_082,
-    1_048_693_993,
-    3_544_189_898,
-    772_921_104,
-    1_694_408_900,
-    4_234_239_033,
-];
-
-/// The three addresses the clock program writes: every block, every 10, every 50.
-/// Checked as well as the owner, so a caller cannot point at some *other*
-/// account the clock program happens to own.
-const CLOCK_ACCOUNT_IDS: [&[u8; 32]; 3] = [
-    b"/LEZ/ClockProgramAccount/0000001",
-    b"/LEZ/ClockProgramAccount/0000010",
-    b"/LEZ/ClockProgramAccount/0000050",
-];
-
-/// Read chain time from a supplied clock account, or refuse.
-fn read_clock(clock: &AccountWithMetadata) -> Result<lez_registry_core::Stamp, SpelError> {
-    if clock.account.program_owner != CLOCK_PROGRAM_ID {
-        return Err(SpelError::custom(
-            E_BAD_CLOCK,
-            "clock account is not owned by the LEZ clock program",
-        ));
-    }
-    let id = clock.account_id.value();
-    if !CLOCK_ACCOUNT_IDS.contains(&id) {
-        return Err(SpelError::custom(
-            E_BAD_CLOCK,
-            "not one of the LEZ clock accounts",
-        ));
-    }
-    let d = &clock.account.data;
-    if d.len() < 16 {
-        return Err(SpelError::custom(E_BAD_CLOCK, "clock account is too short"));
-    }
-    let mut b = [0u8; 8];
-    b.copy_from_slice(&d[0..8]);
-    let block = u64::from_le_bytes(b);
-    b.copy_from_slice(&d[8..16]);
-    let millis = u64::from_le_bytes(b);
-    Ok(lez_registry_core::Stamp { block, millis })
-}
-
-/// A registry entry, stored as the core crate defines it. The on-chain layout
-/// is `lez_registry_core::Entry` verbatim rather than a parallel struct, so a
-/// client that decodes an account gets the type the program wrote.
-#[account_type]
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
-pub struct EntryAccount {
-    pub entry: Vec<u8>,
-}
-
-/// One slot of the sequence directory: which program registered nth.
-///
-/// Exists because the chain cannot enumerate. Resolution never needs this;
-/// discovery does, and without it an indexer has no way to learn which program
-/// ids were ever registered.
-#[account_type]
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
-pub struct DirectoryAccount {
-    pub program_id: [u8; 32],
-    pub entry_seed: [u8; 32],
-}
-
-/// Registry-wide counters.
-#[account_type]
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Default)]
-pub struct GlobalAccount {
-    pub total_entries: u64,
-    pub total_verified: u64,
-}
-
-#[lez_program]
-mod lez_registry {
-    #[allow(unused_imports)]
-    use super::*;
-
-    fn write(account: &mut Account, bytes: &[u8]) -> Result<(), SpelError> {
-        account.data = bytes
-            .to_vec()
-            .try_into()
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "state does not fit the account buffer"))?;
-        Ok(())
-    }
-
-    fn load_entry(account: &Account) -> Result<lez_registry_core::Entry, SpelError> {
-        let wrapper = EntryAccount::try_from_slice(&account.data)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry account failed to decode"))?;
-        borsh::from_slice(&wrapper.entry)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry payload failed to decode"))
-    }
-
-    fn store_entry(
-        account: &mut Account,
-        entry: &lez_registry_core::Entry,
-    ) -> Result<(), SpelError> {
-        let payload = borsh::to_vec(entry)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry failed to encode"))?;
-        let wrapper = borsh::to_vec(&EntryAccount { entry: payload })
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry wrapper failed to encode"))?;
-        write(account, &wrapper)
-    }
-
-    /// Create the singleton global-state account. Permissionless: it holds only
-    /// counters, so there is nothing for a first caller to capture.
-    #[instruction]
-    pub fn initialize(
-        #[account(init, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
-    ) -> SpelResult {
-        let bytes = borsh::to_vec(&GlobalAccount::default())
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
-        write(&mut global.account, &bytes)?;
-        Ok(SpelOutput::execute(vec![global], vec![]))
-    }
-
-    /// Register a program.
-    ///
-    /// The entry account is a PDA whose seed the caller supplies and this
-    /// program re-derives from the program id. A caller who computes it wrongly
-    /// lands on an address the derivation does not produce, and the check below
-    /// refuses — so the address cannot be chosen, only computed.
-    ///
-    /// `canonical` decides which of two derivations applies. The canonical
-    /// address is a function of the program id alone, so there is exactly one
-    /// and a stranger cannot occupy it; a third-party entry is keyed by its
-    /// publisher, so any number of them coexist without colliding.
-    #[instruction]
-    pub fn register(
-        ctx: ProgramContext,
-        #[account(init, pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
-        #[account(init, pda = arg("seq_seed"))] mut directory: AccountWithMetadata,
-        clock: AccountWithMetadata,
-        #[account(signer)] author: AccountWithMetadata,
-        entry_seed: [u8; 32],
-        seq_seed: [u8; 32],
-        program_id: [u8; 32],
-        canonical: u8,
-        name: String,
+/// What one apply does to one shard. Planned from the instruction, applied
+/// against the shard's current bytes.
+#[derive(BorshSerialize, BorshDeserialize)]
+enum Effect {
+    /// Global account: create the counter at zero.
+    InitGlobal,
+    /// Global account: refuse unless the counter is `expect`, then advance it.
+    NextSlot { expect: u64 },
+    /// Directory slot: write once.
+    WriteSlot(DirectorySlot),
+    /// Entry account: write once.
+    CreateEntry(Box<Entry>),
+    /// Program header (loader shard, read-only): refuse unless it is exactly this.
+    HeaderIs(HeaderView),
+    UpdateMeta {
+        author: [u8; 32],
         version: String,
         description: String,
-    ) -> SpelResult {
-        if global.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "global state is not owned by this program",
-            ));
-        }
+        idl: Option<core_::ContentId>,
+    },
+    ClaimSource {
+        author: [u8; 32],
+        claim: SourceClaim,
+    },
+    RecordRebuild {
+        attester: [u8; 32],
+        header: HeaderView,
+        rebuilt: ImageId,
+        at: Stamp,
+    },
+    SyncHeader(HeaderView),
+    Freeze {
+        author: [u8; 32],
+    },
+}
 
-        let author_id = *author.account_id.value();
-        let publisher = if canonical == 1 {
-            lez_registry_core::Publisher::Canonical
-        } else {
-            lez_registry_core::Publisher::ThirdParty
-        };
+// Error codes, as the IDL lists them. A guest failure is a panic, and the
+// sequencer reports its message, so each one starts with its code.
+const E_BAD_ENTRY: &str = "E9001";
+const E_NOT_INITIALIZED: &str = "E9002";
+const E_NOT_AUTHOR: &str = "E9003";
+const E_IMMUTABLE: &str = "E9004";
+const E_WRONG_ACCOUNT: &str = "E9005";
+const E_BAD_CLAIM: &str = "E9006";
+const E_ALREADY_VERIFIED: &str = "E9007";
+const E_ALREADY_REGISTERED: &str = "E9008";
+const E_HEADER_MISMATCH: &str = "E9009";
+const E_NOT_DEPLOYER: &str = "E9010";
+const E_NOT_SIGNED: &str = "E9011";
+const E_SLOT_MISMATCH: &str = "E9012";
 
-        // Re-derive rather than trust. The seed is an argument because the
-        // runtime needs it to place the account, but a supplied seed that does
-        // not match the derivation would let a caller put an entry anywhere.
-        let expected = match publisher {
-            lez_registry_core::Publisher::Canonical => lez_registry_core::entry_seed(&program_id),
-            lez_registry_core::Publisher::ThirdParty => {
-                lez_registry_core::third_party_entry_seed(&program_id, &author_id)
-            }
-        };
-        if expected != entry_seed {
-            return Err(SpelError::custom(
-                E_SEED_MISMATCH,
-                "entry_seed is not the address this program id derives",
-            ));
-        }
+fn main() {
+    run_program(plan, apply)
+}
 
-        // The directory slot is not the caller's to choose either: it is the
-        // counter's current value. Trusting the supplied seed would let a caller
-        // overwrite an earlier slot and hide an entry from every indexer.
-        let mut g = GlobalAccount::try_from_slice(&global.account.data)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
-        if lez_registry_core::seq_seed(g.total_entries) != seq_seed {
-            return Err(SpelError::custom(
-                E_SEED_MISMATCH,
-                "seq_seed is not the slot this registration derives",
-            ));
-        }
+fn pda(me: AccountId, seed: [u8; 32]) -> AccountId {
+    AccountId::for_public_pda(&me, &PdaSeed::new(seed))
+}
 
-        // `init` already refuses an existing account, so a duplicate lands here
-        // rather than silently overwriting someone's entry.
-        if !entry.account.data.is_empty() {
-            return Err(SpelError::custom(
-                E_ALREADY_REGISTERED,
-                "an entry already exists at this address",
-            ));
-        }
+fn expect_at(account: &AccountMeta, expected: AccountId, what: &str) {
+    assert!(
+        account.account_id == expected,
+        "{E_WRONG_ACCOUNT} {what} is not the address this instruction derives"
+    );
+}
 
-        let stamp = read_clock(&clock)?;
-        let mut e =
-            lez_registry_core::Entry::new(program_id, stamp, name, version, author_id, publisher)
-                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
-        e.description = description;
-        e.validate()
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
-        store_entry(&mut entry.account, &e)?;
+fn expect_signed(account: &AccountMeta, what: &str) {
+    assert!(account.is_authorized, "{E_NOT_SIGNED} {what} must sign");
+}
 
-        let slot = borsh::to_vec(&DirectoryAccount {
-            program_id,
-            entry_seed,
-        })
-        .map_err(|_| SpelError::custom(E_BAD_ENTRY, "directory slot failed to encode"))?;
-        write(&mut directory.account, &slot)?;
+fn expect_header(account: &AccountMeta, key: &EntryKey) {
+    assert!(
+        account.account_id.value() == &key.program
+            && account.program_account_id == PROGRAM_LOADER_ACCOUNT_ID,
+        "{E_WRONG_ACCOUNT} the header input must be the program's loader shard"
+    );
+}
 
-        g.total_entries = g
-            .total_entries
-            .checked_add(1)
-            .ok_or_else(|| SpelError::custom(E_BAD_ENTRY, "entry counter overflow"))?;
-        let bytes = borsh::to_vec(&g)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
-        write(&mut global.account, &bytes)?;
+fn the<const N: usize>(input: &PlanInput) -> [AccountMeta; N] {
+    <[AccountMeta; N]>::try_from(input.accounts.clone()).unwrap_or_else(|_| {
+        panic!("{E_WRONG_ACCOUNT} expected {N} accounts")
+    })
+}
 
-        Ok(SpelOutput::execute(
-            vec![entry, global, directory, clock, author],
-            vec![],
-        ))
+/// The runtime-enforced bound on a caller-supplied stamp: the including block
+/// must be at or after it, and no more than the window after it.
+fn stamp_windows(plan: &mut Plan, at: Stamp) {
+    let blocks: BlockValidityWindow = (
+        Some(at.block),
+        Some(at.block.saturating_add(STAMP_BLOCK_WINDOW)),
+    )
+        .try_into()
+        .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} stamp block window is empty"));
+    let millis: TimestampValidityWindow = (
+        Some(at.millis),
+        Some(at.millis.saturating_add(STAMP_MILLIS_WINDOW)),
+    )
+        .try_into()
+        .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} stamp time window is empty"));
+    plan.block_window(blocks);
+    plan.timestamp_window(millis);
+}
+
+fn decode_idl(idl: &str) -> Option<core_::ContentId> {
+    if idl.is_empty() {
+        None
+    } else {
+        Some(core_::decode_content_id(idl).unwrap_or_else(|| {
+            panic!("{E_BAD_ENTRY} idl is not a multibase base58btc content identifier")
+        }))
     }
+}
 
-    /// Update metadata. Author only, and only while unfrozen — both enforced by
-    /// the core's `require_writable_by`, so no instruction can implement half
-    /// the rule.
-    #[instruction]
-    pub fn update(
-        ctx: ProgramContext,
-        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(signer)] author: AccountWithMetadata,
-        entry_seed: [u8; 32],
-        version: String,
-        description: String,
-        idl: String,
-    ) -> SpelResult {
-        let _ = entry_seed;
-        if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "no entry at this address",
-            ));
+fn plan(input: &PlanInput, ix: Instruction) -> Plan {
+    let me = input.self_account_id;
+    let mut plan = Plan::new(input);
+    match ix {
+        Instruction::Initialize => {
+            let [global] = the::<1>(input);
+            expect_at(&global, pda(me, core_::global_seed()), "global");
+            plan.effect(&global, &Effect::InitGlobal);
         }
-        let mut e = load_entry(&entry.account)?;
-        e.require_writable_by(author.account_id.value())
-            .map_err(|err| match err {
-                lez_registry_core::RegistryError::Immutable => {
-                    SpelError::custom(E_IMMUTABLE, "entry is frozen")
-                }
-                _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
-            })?;
-
-        e.version = version;
-        e.description = description;
-        // All-zero means "no IDL", which is distinguishable from a real
-        // identifier because every real one starts with the CIDv1 marker 0x01.
-        // Taken as the multibase string a Logos Storage node actually hands
-        // you, rather than as raw bytes: serde does not implement arrays past
-        // 32, and splitting a 38-byte identifier across two arguments would
-        // invite a caller to reassemble it wrongly. Empty clears the pointer.
-        e.idl = if idl.is_empty() {
-            None
-        } else {
-            match lez_registry_core::decode_content_id(&idl) {
-                Some(id) => Some(id),
+        Instruction::Register {
+            key,
+            header,
+            seq_index,
+            at,
+            name,
+            version,
+            description,
+            tags,
+            idl,
+            source,
+        } => {
+            let [entry, global, directory, program, author] = the::<5>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_at(&global, pda(me, core_::global_seed()), "global");
+            expect_at(&directory, pda(me, core_::seq_seed(seq_index)), "directory");
+            expect_header(&program, &key);
+            expect_signed(&author, "author");
+            let author_id = *author.account_id.value();
+            let publisher = match key.publisher {
+                // The deployer's entry. The loader refused to create this
+                // program's header unless this same account signed, so its
+                // signature here is the deploy authority's.
                 None => {
-                    return Err(SpelError::custom(
-                        E_BAD_ENTRY,
-                        "idl is not a multibase base58btc content identifier",
-                    ))
+                    assert!(
+                        author_id == key.program,
+                        "{E_NOT_DEPLOYER} a deployer entry must be signed by the program's own header account"
+                    );
+                    core_::Publisher::Canonical
                 }
-            }
-        };
-        e.validate()
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "entry fields are empty or too long"))?;
-        store_entry(&mut entry.account, &e)?;
-        Ok(SpelOutput::execute(vec![entry, author], vec![]))
-    }
-
-    /// Attach a source claim to an entry. Author only, because the canonical
-    /// entry is the author's; a stranger who wants to assert something about
-    /// this program registers their own third-party entry and claims there.
-    ///
-    /// This deliberately proves nothing. It records that someone said where the
-    /// source is, which is the input to a rebuild, not a substitute for one.
-    #[instruction]
-    pub fn claim_source(
-        ctx: ProgramContext,
-        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
-        #[account(signer)] author: AccountWithMetadata,
-        entry_seed: [u8; 32],
-        repository: String,
-        commit: [u8; 20],
-        source_digest: [u8; 32],
-        image_digest: [u8; 32],
-        toolchain: String,
-        network_disabled: u8,
-    ) -> SpelResult {
-        let _ = entry_seed;
-        if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "no entry at this address",
-            ));
-        }
-        let mut e = load_entry(&entry.account)?;
-        e.require_writable_by(author.account_id.value())
-            .map_err(|err| match err {
-                lez_registry_core::RegistryError::Immutable => {
-                    SpelError::custom(E_IMMUTABLE, "entry is frozen")
+                Some(p) => {
+                    assert!(
+                        p == author_id,
+                        "{E_WRONG_ACCOUNT} a third-party entry is keyed by its signer"
+                    );
+                    core_::Publisher::ThirdParty
                 }
-                _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
-            })?;
-
-        let claim = lez_registry_core::SourceClaim {
-            repository,
-            commit,
-            source_digest,
-            build: lez_registry_core::BuildEnvironment {
-                image_digest,
-                toolchain,
-                // A u8 rather than a bool because the instruction encoding has no
-                // bool; anything other than 1 is read as "the network was up",
-                // so a caller who fumbles the flag gets the safe answer.
-                network_disabled: network_disabled == 1,
-            },
-        };
-        // Replacing the claim resets the verification, which is the version
-        // binding this design depends on. The counter has to follow: an entry
-        // that stops being verified must stop being counted, or total_verified
-        // drifts upward every time a verified entry is re-claimed and
-        // re-verified. It drifted by one within an hour of the instruction
-        // existing, and the end-to-end test that compares the counter against
-        // the actual walk is what noticed.
-        let was_verified = e.verification.is_verified();
-        e.verification = lez_registry_core::Verification::claim(claim)
-            .map_err(|_| SpelError::custom(E_BAD_CLAIM, "claim fields are empty or too long"))?;
-        store_entry(&mut entry.account, &e)?;
-
-        if was_verified {
-            if global.account.program_owner != ctx.self_program_id {
-                return Err(SpelError::custom(
-                    E_NOT_ANCHORED,
-                    "global state is not owned by this program",
-                ));
+            };
+            let mut e = Entry::new(key.program, at, name, version, author_id, publisher)
+                .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} entry fields are empty or too long"))
+                .with_header(header.image_id, header.immutable);
+            e.description = description;
+            e.tags = tags;
+            e.idl = decode_idl(&idl);
+            if let Some(claim) = source {
+                e.verification = Verification::claim(claim)
+                    .unwrap_or_else(|_| panic!("{E_BAD_CLAIM} source claim is empty or too long"));
             }
-            let mut g = GlobalAccount::try_from_slice(&global.account.data)
-                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
-            g.total_verified = g.total_verified.saturating_sub(1);
-            let bytes = borsh::to_vec(&g)
-                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
-            write(&mut global.account, &bytes)?;
-        }
+            e.validate()
+                .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} entry fields are empty or too long"));
 
-        Ok(SpelOutput::execute(vec![entry, global, author], vec![]))
+            stamp_windows(&mut plan, at);
+            plan.inspect(&program, PROGRAM_LOADER_ACCOUNT_ID, &Effect::HeaderIs(header));
+            plan.effect(&global, &Effect::NextSlot { expect: seq_index });
+            plan.effect(
+                &directory,
+                &Effect::WriteSlot(DirectorySlot {
+                    program_id: key.program,
+                    entry_seed: key.seed(),
+                }),
+            );
+            plan.effect(&entry, &Effect::CreateEntry(Box::new(e)));
+        }
+        Instruction::Update {
+            key,
+            version,
+            description,
+            idl,
+        } => {
+            let [entry, author] = the::<2>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_signed(&author, "author");
+            plan.effect(
+                &entry,
+                &Effect::UpdateMeta {
+                    author: *author.account_id.value(),
+                    version,
+                    description,
+                    idl: decode_idl(&idl),
+                },
+            );
+        }
+        Instruction::ClaimSource { key, claim } => {
+            let [entry, author] = the::<2>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_signed(&author, "author");
+            plan.effect(
+                &entry,
+                &Effect::ClaimSource {
+                    author: *author.account_id.value(),
+                    claim,
+                },
+            );
+        }
+        Instruction::RecordRebuild {
+            key,
+            header,
+            rebuilt,
+            at,
+        } => {
+            let [entry, program, attester] = the::<3>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_header(&program, &key);
+            // Signed, or anyone could put words in someone else's mouth: the
+            // attester is what a reader weighs a verdict by.
+            expect_signed(&attester, "attester");
+            stamp_windows(&mut plan, at);
+            plan.inspect(&program, PROGRAM_LOADER_ACCOUNT_ID, &Effect::HeaderIs(header));
+            plan.effect(
+                &entry,
+                &Effect::RecordRebuild {
+                    attester: *attester.account_id.value(),
+                    header,
+                    rebuilt,
+                    at,
+                },
+            );
+        }
+        Instruction::SyncHeader { key, header } => {
+            let [entry, program] = the::<2>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_header(&program, &key);
+            plan.inspect(&program, PROGRAM_LOADER_ACCOUNT_ID, &Effect::HeaderIs(header));
+            plan.effect(&entry, &Effect::SyncHeader(header));
+        }
+        Instruction::Freeze { key } => {
+            let [entry, author] = the::<2>(input);
+            expect_at(&entry, pda(me, key.seed()), "entry");
+            expect_signed(&author, "author");
+            plan.effect(
+                &entry,
+                &Effect::Freeze {
+                    author: *author.account_id.value(),
+                },
+            );
+        }
     }
+    plan
+}
 
-    /// Record that a rebuild of the claimed source reproduced this entry's
-    /// bytecode.
-    ///
-    /// **Anyone may call this**, and that is the design rather than an oversight.
-    /// Restricting it to the author would make `Verified` mean "the author says
-    /// so", which is what the state exists to improve on. Opening it means the
-    /// signer is written down as the attester, so the badge always carries a name
-    /// and a reader decides whose word it is worth.
-    ///
-    /// A chain cannot compile, so nothing here checks that the rebuild happened.
-    /// What it checks is that the claimed environment had the network disabled —
-    /// the one condition under which a matching rebuild is evidence at all.
-    #[instruction]
-    pub fn record_rebuild(
-        ctx: ProgramContext,
-        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
-        clock: AccountWithMetadata,
-        #[account(signer)] attester: AccountWithMetadata,
-        entry_seed: [u8; 32],
-        rebuilt: [u8; 32],
-    ) -> SpelResult {
-        let _ = entry_seed;
-        if entry.account.program_owner != ctx.self_program_id
-            || global.account.program_owner != ctx.self_program_id
-        {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "entry or global state is not owned by this program",
-            ));
+fn encode<T: BorshSerialize>(value: &T) -> Vec<u8> {
+    borsh::to_vec(value).expect("borsh serialization is infallible")
+}
+
+fn load_entry(pre: &[u8]) -> Entry {
+    assert!(!pre.is_empty(), "{E_BAD_ENTRY} no entry at this address");
+    borsh::from_slice(pre).unwrap_or_else(|_| panic!("{E_BAD_ENTRY} entry failed to decode"))
+}
+
+fn writable(e: &Entry, who: &[u8; 32]) {
+    match e.require_writable_by(who) {
+        Ok(()) => {}
+        Err(RegistryError::Immutable) => panic!("{E_IMMUTABLE} entry is frozen"),
+        Err(_) => panic!("{E_NOT_AUTHOR} signer is not this entry's author"),
+    }
+}
+
+fn image_bytes(h: &ProgramHeader) -> ImageId {
+    let mut out = [0u8; 32];
+    for (chunk, word) in out.chunks_exact_mut(4).zip(h.image_id.iter()) {
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    out
+}
+
+fn apply(effect: Effect, pre: &[u8]) -> Option<Vec<u8>> {
+    match effect {
+        Effect::InitGlobal => {
+            assert!(pre.is_empty(), "{E_ALREADY_REGISTERED} already initialized");
+            Some(encode(&GlobalState::default()))
         }
-        let mut e = load_entry(&entry.account)?;
-        let was_verified = e.verification.is_verified();
-        let subject = e.program_id;
-
-        let stamp = read_clock(&clock)?;
-        let outcome =
-            e.verification
-                .record_rebuild(rebuilt, subject, *attester.account_id.value(), stamp);
-
-        // Returning Err here would discard the write: an erroring instruction
-        // aborts the transaction, so the post-state never lands. That was this
-        // instruction's first shape, and reading the account back after a
-        // refusal showed the entry still `Claimed` with no attester -- the
-        // "recorded refusal" existed only in the source.
-        //
-        // So the two outcomes are split by whether there is anything to record.
-        // A networked build IS an outcome: Unreproducible, with the attester
-        // named, committed by returning Ok. Nobody can grief an entry this way,
-        // because the verdict is a function of the claim the author wrote --
-        // anyone reading it can already see the build was networked.
-        // Two of the three failures are *outcomes* and have to survive: a
-        // networked build and a mismatch both leave a state a reader needs. An
-        // erroring instruction aborts its transaction, so persisting them means
-        // returning Ok -- see the comment on the earlier shape of this code.
-        let recorded = matches!(
-            outcome,
-            Err(lez_registry_core::RegistryError::NetworkedBuild)
-                | Err(lez_registry_core::RegistryError::ArtifactMismatch)
-        );
-        if let Err(err) = outcome {
-            if !recorded {
-                return match err {
-                    lez_registry_core::RegistryError::AlreadyVerified => Err(SpelError::custom(
-                        E_NOT_VERIFIED,
-                        "this entry is already verified; a mismatch assertion cannot erase it",
-                    )),
-                    _ => Err(SpelError::custom(E_BAD_CLAIM, "no claim to rebuild")),
-                };
-            }
-        }
-
-        store_entry(&mut entry.account, &e)?;
-
-        if recorded {
-            // `global` and `clock` are returned unmodified rather than dropped.
-            // The post-state must carry every account the instruction declares --
-            // omitting one is refused by the runtime with the same silent message
-            // as every other failure, which cost a deploy cycle to find.
-            //
-            // The counter deliberately does not move: neither Unreproducible nor
-            // Mismatched is a verification, and total_verified must never grow
-            // for one.
-            return Ok(SpelOutput::execute(
-                vec![entry, global, clock, attester],
-                vec![],
-            ));
-        }
-
-        // Only the transition counts. Re-attesting an already-verified entry adds
-        // an attester, not a verified program, and a counter that grew each time
-        // would overstate the registry's own coverage.
-        if !was_verified {
-            let mut g = GlobalAccount::try_from_slice(&global.account.data)
-                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
-            g.total_verified = g
-                .total_verified
+        Effect::NextSlot { expect } => {
+            assert!(!pre.is_empty(), "{E_NOT_INITIALIZED} registry is not initialized");
+            let mut g: GlobalState = borsh::from_slice(pre)
+                .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} global failed to decode"));
+            // The directory slot is not the caller's to choose: it is the
+            // counter's current value, or an earlier slot could be overwritten
+            // and an entry hidden from every indexer.
+            assert!(
+                g.total_entries == expect,
+                "{E_SLOT_MISMATCH} seq_index is not the next directory slot"
+            );
+            g.total_entries = g
+                .total_entries
                 .checked_add(1)
-                .ok_or_else(|| SpelError::custom(E_BAD_ENTRY, "verified counter overflow"))?;
-            let bytes = borsh::to_vec(&g)
-                .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
-            write(&mut global.account, &bytes)?;
+                .unwrap_or_else(|| panic!("{E_BAD_ENTRY} entry counter overflow"));
+            Some(encode(&g))
         }
-
-        Ok(SpelOutput::execute(
-            vec![entry, global, clock, attester],
-            vec![],
-        ))
-    }
-
-    /// Take a canonical entry by proving you can rebuild what is deployed.
-    ///
-    /// LEZ has no deploy authority — deployment is content-addressed and
-    /// permissionless — so the construction this criterion is modelled on has no
-    /// counterpart. First-come would be front-runnable, which the prize names as
-    /// broken. So the canonical slot is takeable, and what takes it is the one
-    /// thing a squatter cannot fake: an offline rebuild reproducing the deployed
-    /// bytecode.
-    ///
-    /// Callable by anyone, which is the point. A squatter can hold an entry
-    /// nobody can back; they cannot hold one against someone with the source.
-    #[instruction]
-    pub fn claim_canonical(
-        ctx: ProgramContext,
-        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(mut, pda = [literal("lez-registry:global:v1")])] mut global: AccountWithMetadata,
-        clock: AccountWithMetadata,
-        #[account(signer)] challenger: AccountWithMetadata,
-        entry_seed: [u8; 32],
-        rebuilt: [u8; 32],
-    ) -> SpelResult {
-        let _ = entry_seed;
-        if entry.account.program_owner != ctx.self_program_id
-            || global.account.program_owner != ctx.self_program_id
-        {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "entry or global state is not owned by this program",
-            ));
+        Effect::WriteSlot(slot) => {
+            assert!(pre.is_empty(), "{E_SLOT_MISMATCH} directory slot already written");
+            Some(encode(&slot))
         }
-        let mut e = load_entry(&entry.account)?;
-        let stamp = read_clock(&clock)?;
-        e.claim_canonical(*challenger.account_id.value(), rebuilt, stamp)
-            .map_err(|err| match err {
-                lez_registry_core::RegistryError::ArtifactMismatch => SpelError::custom(
-                    E_NOT_VERIFIED,
-                    "the rebuild does not reproduce this entry's bytecode",
-                ),
-                lez_registry_core::RegistryError::NetworkedBuild => SpelError::custom(
-                    E_NOT_VERIFIED,
-                    "the claimed build ran with the network up, so it buys nothing",
-                ),
-                lez_registry_core::RegistryError::AlreadyVerified => SpelError::custom(
-                    E_NOT_AUTHOR,
-                    "this entry is verified; its author is settled",
-                ),
-                lez_registry_core::RegistryError::Immutable => {
-                    SpelError::custom(E_IMMUTABLE, "entry is frozen")
-                }
-                lez_registry_core::RegistryError::NotAuthor => SpelError::custom(
-                    E_NOT_AUTHOR,
-                    "a third-party entry is keyed by its publisher and is not contestable",
-                ),
-                _ => SpelError::custom(E_BAD_CLAIM, "no source claim to rebuild"),
-            })?;
-        store_entry(&mut entry.account, &e)?;
-
-        // A takeover turns an unverified entry into a verified one, so the
-        // counter moves exactly once here -- the entry could not have been
-        // verified before, or the takeover would have been refused.
-        let mut g = GlobalAccount::try_from_slice(&global.account.data)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to decode"))?;
-        g.total_verified = g
-            .total_verified
-            .checked_add(1)
-            .ok_or_else(|| SpelError::custom(E_BAD_ENTRY, "verified counter overflow"))?;
-        let bytes = borsh::to_vec(&g)
-            .map_err(|_| SpelError::custom(E_BAD_ENTRY, "global failed to encode"))?;
-        write(&mut global.account, &bytes)?;
-
-        Ok(SpelOutput::execute(
-            vec![entry, global, clock, challenger],
-            vec![],
-        ))
-    }
-
-    /// Freeze an entry. One-way: no instruction in this program lowers the flag,
-    /// which is the only thing that makes immutability worth anything.
-    #[instruction]
-    pub fn freeze(
-        ctx: ProgramContext,
-        #[account(pda = arg("entry_seed"))] mut entry: AccountWithMetadata,
-        #[account(signer)] author: AccountWithMetadata,
-        entry_seed: [u8; 32],
-    ) -> SpelResult {
-        let _ = entry_seed;
-        if entry.account.program_owner != ctx.self_program_id {
-            return Err(SpelError::custom(
-                E_NOT_ANCHORED,
-                "no entry at this address",
-            ));
+        Effect::CreateEntry(entry) => {
+            assert!(
+                pre.is_empty(),
+                "{E_ALREADY_REGISTERED} an entry already exists at this address"
+            );
+            Some(encode(entry.as_ref()))
         }
-        let mut e = load_entry(&entry.account)?;
-        e.freeze(author.account_id.value())
-            .map_err(|err| match err {
-                lez_registry_core::RegistryError::Immutable => {
-                    SpelError::custom(E_IMMUTABLE, "entry is already frozen")
-                }
-                _ => SpelError::custom(E_NOT_AUTHOR, "signer is not this entry's author"),
-            })?;
-        store_entry(&mut entry.account, &e)?;
-        Ok(SpelOutput::execute(vec![entry, author], vec![]))
+        Effect::HeaderIs(view) => {
+            let h = ProgramHeader::from_bytes(pre).unwrap_or_else(|| {
+                panic!("{E_HEADER_MISMATCH} this account holds no program header")
+            });
+            assert!(
+                image_bytes(&h) == view.image_id && h.immutable == view.immutable,
+                "{E_HEADER_MISMATCH} the program header on chain is not the one supplied"
+            );
+            // Read-only: a foreign shard can never be written by this program.
+            None
+        }
+        Effect::UpdateMeta {
+            author,
+            version,
+            description,
+            idl,
+        } => {
+            let mut e = load_entry(pre);
+            writable(&e, &author);
+            e.version = version;
+            e.description = description;
+            e.idl = idl;
+            e.validate()
+                .unwrap_or_else(|_| panic!("{E_BAD_ENTRY} entry fields are empty or too long"));
+            Some(encode(&e))
+        }
+        Effect::ClaimSource { author, claim } => {
+            let mut e = load_entry(pre);
+            writable(&e, &author);
+            // Replacing the claim resets the verdict: a verification is about
+            // one claim, and a new claim has not been rebuilt by anyone.
+            e.verification = Verification::claim(claim)
+                .unwrap_or_else(|_| panic!("{E_BAD_CLAIM} claim fields are empty or too long"));
+            Some(encode(&e))
+        }
+        Effect::RecordRebuild {
+            attester,
+            header,
+            rebuilt,
+            at,
+        } => {
+            let mut e = load_entry(pre);
+            // The header was just checked on chain by the HeaderIs effect, so
+            // the subject of the verdict is a chain fact. If it moved since the
+            // entry last looked, the old verdict goes stale first.
+            e.sync_header(header.image_id, header.immutable);
+            let subject = e.image_id;
+            match e.verification.record_rebuild(rebuilt, subject, attester, at) {
+                // A mismatch and a networked build are outcomes, not failures:
+                // an erroring apply would abort the transaction and the verdict
+                // would never land.
+                Ok(())
+                | Err(RegistryError::ArtifactMismatch)
+                | Err(RegistryError::NetworkedBuild) => Some(encode(&e)),
+                Err(RegistryError::AlreadyVerified) => panic!(
+                    "{E_ALREADY_VERIFIED} this entry is verified; a mismatch assertion cannot erase it"
+                ),
+                Err(_) => panic!("{E_BAD_CLAIM} no source claim to rebuild"),
+            }
+        }
+        Effect::SyncHeader(view) => {
+            let mut e = load_entry(pre);
+            e.sync_header(view.image_id, view.immutable);
+            Some(encode(&e))
+        }
+        Effect::Freeze { author } => {
+            let mut e = load_entry(pre);
+            match e.freeze(&author) {
+                Ok(()) => Some(encode(&e)),
+                Err(RegistryError::Immutable) => panic!("{E_IMMUTABLE} entry is already frozen"),
+                Err(_) => panic!("{E_NOT_AUTHOR} signer is not this entry's author"),
+            }
+        }
     }
 }
