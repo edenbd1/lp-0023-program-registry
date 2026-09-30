@@ -130,29 +130,121 @@ fn a_verdict_is_always_dated_so_staleness_is_the_readers_to_judge() {
 }
 
 #[test]
-fn a_verification_cannot_go_stale_because_the_subject_is_the_key() {
-    // The state a registry for an account-addressed chain needs most is the one
-    // this type cannot express. There, code at an address can be replaced under
-    // an honestly earned verification, so "verified" has to decay. Here the
-    // entry is keyed by the ImageID, so the only way to have different bytecode
-    // is to be a different entry, and a verification stays true.
-    let subject = [1u8; 32];
-    let mut v = Verification::claim(claim_for(true)).unwrap();
-    v.record_rebuild(subject, subject, ATTESTER, T0).unwrap();
-    assert!(v.is_verified());
+fn a_repointed_header_makes_a_verdict_stale_and_a_new_rebuild_can_follow() {
+    // On v0.3 a mutable header can be repointed at new bytecode after a
+    // verification was earned. The verdict must decay, and only the header
+    // (a chain fact) can make it decay, not a caller's assertion.
+    let old_image = [1u8; 32];
+    let new_image = [2u8; 32];
+    let mut e = Entry::new(
+        [9u8; 32],
+        T0,
+        "prog".into(),
+        "1.0.0".into(),
+        AUTHOR,
+        Publisher::Canonical,
+    )
+    .unwrap()
+    .with_header(old_image, false);
+    e.verification = Verification::claim(claim_for(true)).unwrap();
+    e.verification
+        .record_rebuild(old_image, e.image_id, ATTESTER, T0)
+        .unwrap();
+    assert!(e.verification.is_verified());
 
-    // There is no call that takes this entry to any other artifact. The nearest
-    // thing to an upgrade is a rebuild claiming different bytecode, and once a
-    // verification exists that is refused outright -- see
-    // `a_mismatch_assertion_cannot_erase_a_demonstrated_verification`.
+    // A mismatch assertion alone still cannot erase it.
     assert_eq!(
-        v.record_rebuild([2u8; 32], subject, ATTESTER, T1)
+        e.verification
+            .record_rebuild(new_image, e.image_id, ATTESTER, T1)
             .unwrap_err(),
         RegistryError::AlreadyVerified
     );
-    assert!(
-        v.is_verified(),
-        "a refused rebuild must not revoke a verification that was earned"
+
+    // The header moving does.
+    assert!(!e.sync_header(old_image, false), "same image, nothing changes");
+    assert!(e.verification.is_verified());
+    assert!(e.sync_header(new_image, false));
+    assert_eq!(e.verification.state, VerificationState::Stale);
+    assert_eq!(e.image_id, new_image);
+    assert!(e.verification.claim.is_some(), "the claim survives");
+
+    // And a rebuild of the new image verifies again.
+    e.verification
+        .record_rebuild(new_image, e.image_id, ATTESTER, T1)
+        .unwrap();
+    assert!(e.verification.is_verified());
+}
+
+#[test]
+fn syncing_a_header_records_its_frozen_flag_even_on_a_frozen_entry() {
+    let image = [3u8; 32];
+    let mut e = Entry::new(
+        [9u8; 32],
+        T0,
+        "prog".into(),
+        "1.0.0".into(),
+        AUTHOR,
+        Publisher::Canonical,
+    )
+    .unwrap()
+    .with_header(image, false);
+    e.freeze(&AUTHOR).unwrap();
+    assert!(!e.sync_header(image, true));
+    assert!(e.header_immutable, "a chain fact is recorded regardless");
+    assert!(e.frozen);
+}
+
+#[test]
+fn an_unclaimed_entry_does_not_become_stale() {
+    let mut e = Entry::new(
+        [9u8; 32],
+        T0,
+        "prog".into(),
+        "1.0.0".into(),
+        AUTHOR,
+        Publisher::ThirdParty,
+    )
+    .unwrap()
+    .with_header([1u8; 32], false);
+    assert!(e.sync_header([2u8; 32], false));
+    assert_eq!(e.verification.state, VerificationState::Unclaimed);
+}
+
+#[test]
+fn instruction_indices_follow_declaration_order() {
+    use lez_registry_core::instruction::*;
+    let key = EntryKey {
+        program: [1u8; 32],
+        publisher: None,
+    };
+    let ix = Instruction::Freeze { key };
+    let bytes = borsh::to_vec(&ix).unwrap();
+    assert_eq!(bytes[0], 6);
+    assert_eq!(bytes[0], ix.index());
+    assert_eq!(Instruction::NAMES[ix.index() as usize], "freeze");
+    assert_eq!(borsh::to_vec(&Instruction::Initialize).unwrap(), vec![0]);
+}
+
+#[test]
+fn an_entry_key_derives_the_same_seeds_as_the_free_functions() {
+    use lez_registry_core::instruction::EntryKey;
+    let p = [5u8; 32];
+    let a = [6u8; 32];
+    assert_eq!(
+        EntryKey {
+            program: p,
+            publisher: None
+        }
+        .seed(),
+        entry_seed(&p)
+    );
+    assert_eq!(
+        EntryKey {
+            program: p,
+            publisher: Some(a)
+        }
+        .seed(),
+        third_party_entry_seed(&p, &a)
     );
 }
 
@@ -490,116 +582,3 @@ fn a_malformed_identifier_is_refused_rather_than_half_decoded() {
     );
 }
 
-/// Squatting is possible and worthless: registering first gets you an entry, and
-/// only a rebuild that reproduces the deployed bytecode makes it stick.
-mod canonical_takeover {
-    use super::*;
-
-    const SQUATTER: AccountId = [0x11; 32];
-    const REAL: AccountId = [0x22; 32];
-    const SUBJECT: ProgramId = [0x33; 32];
-
-    fn squatted() -> Entry {
-        let mut e = Entry::new(
-            SUBJECT,
-            T0,
-            "popular-program".into(),
-            "1.0.0".into(),
-            SQUATTER,
-            Publisher::Canonical,
-        )
-        .unwrap();
-        e.verification = Verification::claim(claim_for(true)).unwrap();
-        e
-    }
-
-    #[test]
-    fn whoever_can_rebuild_it_takes_the_entry() {
-        let mut e = squatted();
-        assert_eq!(e.author, SQUATTER);
-
-        e.claim_canonical(REAL, SUBJECT, T1).unwrap();
-        assert_eq!(
-            e.author, REAL,
-            "the entry moves to whoever proved the build"
-        );
-        assert!(e.verification.is_verified());
-        assert_eq!(e.verification.attester, Some(REAL));
-        assert_eq!(e.verification.last_checked, Some(T1));
-    }
-
-    #[test]
-    fn a_challenger_who_cannot_reproduce_the_bytecode_takes_nothing() {
-        // This is the demo the criterion asks for: an unauthorised attempt at a
-        // canonical entry, rejected.
-        let mut e = squatted();
-        assert_eq!(
-            e.claim_canonical(REAL, [0x99; 32], T1).unwrap_err(),
-            RegistryError::ArtifactMismatch
-        );
-        assert_eq!(
-            e.author, SQUATTER,
-            "the squatter keeps an entry nobody can back"
-        );
-        assert!(!e.verification.is_verified());
-    }
-
-    #[test]
-    fn a_networked_rebuild_cannot_buy_the_entry() {
-        // Otherwise the takeover path becomes the attack: a build.rs that
-        // downloads the deployed binary reproduces it perfectly.
-        let mut e = squatted();
-        e.verification = Verification::claim(claim_for(false)).unwrap();
-        assert_eq!(
-            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
-            RegistryError::NetworkedBuild
-        );
-        assert_eq!(e.author, SQUATTER);
-    }
-
-    #[test]
-    fn a_verified_entry_cannot_be_taken_from_its_author() {
-        // Once someone has demonstrated the build, the author is settled. A
-        // takeover that worked on a verified entry would be the attack rather
-        // than the defence against it.
-        let mut e = squatted();
-        e.claim_canonical(REAL, SUBJECT, T1).unwrap();
-
-        let third: AccountId = [0x44; 32];
-        assert_eq!(
-            e.claim_canonical(third, SUBJECT, T1).unwrap_err(),
-            RegistryError::AlreadyVerified
-        );
-        assert_eq!(e.author, REAL);
-    }
-
-    #[test]
-    fn a_third_party_entry_is_not_contestable() {
-        // It is keyed by its publisher, so it is theirs by construction and
-        // there is nothing to contest.
-        let mut e = Entry::new(
-            SUBJECT,
-            T0,
-            "someone's opinion".into(),
-            "1.0.0".into(),
-            SQUATTER,
-            Publisher::ThirdParty,
-        )
-        .unwrap();
-        e.verification = Verification::claim(claim_for(true)).unwrap();
-        assert_eq!(
-            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
-            RegistryError::NotAuthor
-        );
-    }
-
-    #[test]
-    fn a_frozen_entry_is_not_contestable_either() {
-        let mut e = squatted();
-        e.freeze(&SQUATTER).unwrap();
-        assert_eq!(
-            e.claim_canonical(REAL, SUBJECT, T1).unwrap_err(),
-            RegistryError::Immutable
-        );
-    }
-}

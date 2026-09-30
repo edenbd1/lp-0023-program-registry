@@ -39,11 +39,20 @@ use alloc::vec::Vec;
 use borsh::{BorshDeserialize, BorshSerialize};
 use sha2::{Digest, Sha256};
 
-/// A LEZ program identifier: the RISC0 ImageID of its guest ELF.
+/// A LEZ program identifier.
 ///
-/// Not a hash of the deployed file — see [`deployment_digest`] for why the two
-/// are different numbers and what each one is good for.
+/// On LEZ v0.3 a program is an **account**: the header account its deployer
+/// chose and signed for, which calls dispatch to and PDAs derive from. The
+/// registry keys entries by that account id. The bytecode behind it is named
+/// separately by its [`ImageId`], which the runtime recomputes from the segment
+/// chain and records in the header.
 pub type ProgramId = [u8; 32];
+
+/// The RISC0 ImageID of a guest ELF, as the 32 bytes the loader stores in a
+/// program header (`[u32; 8]`, little-endian words).
+///
+/// Not a hash of the deployed file: see [`deployment_digest`].
+pub type ImageId = [u8; 32];
 
 /// A 32-byte account identifier.
 pub type AccountId = [u8; 32];
@@ -129,7 +138,9 @@ pub const MAX_TOOLCHAIN: usize = 64;
 /// curation is explicitly out of scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Publisher {
-    /// Published by an account that proved control of the deployed program.
+    /// The deployer's entry: signed by the program's own header account, the
+    /// key the loader required to create the program. On LEZ v0.3 that is a
+    /// fact the registry checks at registration, not an assertion.
     Canonical,
     /// Published by anyone else. Not lesser, not greater — different.
     ThirdParty,
@@ -192,16 +203,15 @@ impl SourceClaim {
     }
 }
 
-/// What the registry knows about an entry's build, as four states a UI must be
-/// able to tell apart.
+/// What the registry knows about an entry's build, as states a UI must be able
+/// to tell apart.
 ///
-/// There is no `Stale`, and its absence is a design decision rather than an
-/// omission. Registries for account-addressed chains need one, because the code
-/// at an address can be replaced under a verification that was honestly earned.
-/// Here an entry is keyed by its ImageID, so the bytecode *is* the key: nothing
-/// can be swapped beneath it, and a verification that was ever true stays true.
-/// Modelling a state that cannot be reached would mean writing branches no test
-/// can exercise and a UI legend for something a user will never see.
+/// LEZ v0.3 made programs account-addressed: a mutable header can be repointed
+/// at new bytecode after a verification was honestly earned. So there is a
+/// `Stale` state, reached only by [`Entry::sync_header`] observing that the
+/// header's ImageID is no longer the one the verdict was about. A frozen
+/// (immutable) header can never go stale, which is why the entry records the
+/// header's `immutable` flag next to the verdict.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum VerificationState {
     /// No source has been claimed. The honest default.
@@ -220,6 +230,10 @@ pub enum VerificationState {
     /// where the source is" and "somebody said, and it does not reproduce" are
     /// opposite signals: the first is a gap, the second is evidence against.
     Mismatched,
+    /// A verdict was recorded, then the program's header was repointed at
+    /// different bytecode. The verdict is kept for the record but is about an
+    /// image that no longer runs, so it must be rebuilt against the new one.
+    Stale,
 }
 
 /// The verification attached to an entry, kept as its own type so a state and
@@ -270,12 +284,10 @@ impl Verification {
 
     /// Record the outcome of a rebuild.
     ///
-    /// `rebuilt` is the ImageID the rebuild produced; `subject` is the entry's
-    /// own key. There is deliberately no third "currently deployed" argument to
-    /// reconcile against: on a content-addressed chain the key *is* the
-    /// bytecode, so such an argument could only ever equal `subject`, and a
-    /// parameter that can only take one value is a place for a caller to be
-    /// wrong.
+    /// `rebuilt` is the ImageID the rebuild produced; `subject` is the ImageID
+    /// the program's header records on chain. The on-chain program only passes
+    /// a `subject` it has just checked against the header's loader shard, so
+    /// the comparison is between a caller's attestation and a chain fact.
     pub fn record_rebuild(
         &mut self,
         rebuilt: ProgramId,
@@ -353,7 +365,14 @@ impl Verification {
 /// One registry entry.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Entry {
+    /// The program's header account id: what calls dispatch to.
     pub program_id: ProgramId,
+    /// The ImageID the program's header recorded when this entry last looked,
+    /// checked on chain against the header's loader shard.
+    pub image_id: ImageId,
+    /// Whether that header was immutable. A frozen header can never be
+    /// repointed, so a verdict about it can never go stale.
+    pub header_immutable: bool,
     /// When this entry was registered, read from the sequencer's clock.
     ///
     /// The adoption story a registry tells — how many programs, registered over
@@ -385,6 +404,8 @@ impl Entry {
     ) -> Result<Self> {
         let e = Self {
             program_id,
+            image_id: [0u8; 32],
+            header_immutable: false,
             registered_at,
             name,
             version,
@@ -417,81 +438,44 @@ impl Entry {
         Ok(())
     }
 
-    /// Only the recorded author may change an entry, and only while it is not
-    /// frozen. Both checks live here so no instruction can forget one.
-    /// Take the canonical entry by proving you can rebuild what is deployed.
-    ///
-    /// LEZ has no deploy authority. Deployment is content-addressed and
-    /// permissionless, so nobody owns a program id and no on-chain fact says who
-    /// published one — which means "canonical = the upgrade authority", the
-    /// construction this criterion is modelled on, has no counterpart here.
-    ///
-    /// First-come would be the easy answer and the prize names it as broken: an
-    /// attacker registers a popular program id under a plausible name before its
-    /// author does, and permanently owns the entry wallets display.
-    ///
-    /// So the canonical slot is *takeable*, and what takes it is the one thing a
-    /// squatter cannot fake: an offline rebuild that reproduces the deployed
-    /// bytecode. On a content-addressed chain the party who can produce the
-    /// bytes from source is the closest thing to an authority that exists, and
-    /// it is a stronger claim than a deploy signature, which only proves someone
-    /// pressed a button.
-    ///
-    /// Once an entry is verified the author is settled: a later challenger
-    /// cannot displace a claim that was actually demonstrated, or the takeover
-    /// path would itself become the attack.
-    ///
-    /// # What this does not do
-    ///
-    /// It does not identify the program's real author, and it must not be read
-    /// that way. Source is usually public, so a squatter who points at the real
-    /// repository can rebuild it as readily as its maintainer, and would then
-    /// hold the slot. What changes is what holding the slot is worth: an entry
-    /// cannot be *verified* while naming a repository that does not build it, so
-    /// the name, the description and the source on a verified canonical entry are
-    /// accurate even when the account holding it is a stranger.
-    ///
-    /// That is the property a wallet user actually needs — "does this bytecode
-    /// come from that source" — and it is answered correctly regardless of who
-    /// won the race. Authorship here is *demonstrated capability*, not identity,
-    /// and [`Verification::is_self_attested`] is what tells a reader which one
-    /// they are looking at. Solving identity would need something this chain does
-    /// not have.
-    pub fn claim_canonical(
-        &mut self,
-        challenger: AccountId,
-        rebuilt: ProgramId,
-        at: Stamp,
-    ) -> Result<()> {
-        if self.frozen {
-            return Err(RegistryError::Immutable);
-        }
-        if !matches!(self.publisher, Publisher::Canonical) {
-            // A third-party entry is keyed by its publisher and is theirs by
-            // construction. There is nothing to contest.
-            return Err(RegistryError::NotAuthor);
-        }
-        if self.verification.is_verified() {
-            return Err(RegistryError::AlreadyVerified);
-        }
-        let claim = match &self.verification.claim {
-            Some(c) => c,
-            None => return Err(RegistryError::Empty),
-        };
-        if !claim.build.network_disabled {
-            // A networked rebuild proves nothing, so it cannot buy the entry.
-            return Err(RegistryError::NetworkedBuild);
-        }
-        if rebuilt != self.program_id {
-            return Err(RegistryError::ArtifactMismatch);
-        }
-        self.author = challenger;
-        self.verification.state = VerificationState::Verified;
-        self.verification.attester = Some(challenger);
-        self.verification.last_checked = Some(at);
-        Ok(())
+    /// Record the program header this entry is about, as read from chain.
+    #[must_use]
+    pub fn with_header(mut self, image_id: ImageId, immutable: bool) -> Self {
+        self.image_id = image_id;
+        self.header_immutable = immutable;
+        self
     }
 
+    /// Bring the entry in line with the program's header as it is on chain now.
+    ///
+    /// Returns whether the ImageID changed. When it did, any verdict about the
+    /// old image (verified, mismatched, unreproducible) becomes
+    /// [`VerificationState::Stale`]: it was true of bytecode that no longer
+    /// runs at this program id. The claim itself is kept, so a rebuild against
+    /// the new image can be recorded without the author re-claiming.
+    ///
+    /// Allowed on a frozen entry. Freezing stops the *author's* assertions from
+    /// changing; the header is a chain fact, and refusing to record it would let
+    /// a frozen entry keep showing a verdict about replaced bytecode.
+    pub fn sync_header(&mut self, image_id: ImageId, immutable: bool) -> bool {
+        let changed = self.image_id != image_id;
+        if changed {
+            self.image_id = image_id;
+            if matches!(
+                self.verification.state,
+                VerificationState::Verified
+                    | VerificationState::Mismatched
+                    | VerificationState::Unreproducible
+            ) {
+                self.verification.state = VerificationState::Stale;
+            }
+        }
+        self.header_immutable = immutable;
+        changed
+    }
+
+    /// Only the recorded author may change an entry, and only while it is not
+    /// frozen. Both checks live here so no instruction can forget one.
     pub fn require_writable_by(&self, caller: &AccountId) -> Result<()> {
         if self.frozen {
             return Err(RegistryError::Immutable);
@@ -513,8 +497,14 @@ impl Entry {
 /// Registry-wide state, as a singleton.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct GlobalState {
+    /// How many registrations the directory holds, which is also the index the
+    /// next registration must name.
+    ///
+    /// There is no verified counter. On v0.3 an apply sees one shard, so the
+    /// global account cannot know what verdict an entry's apply just reached;
+    /// a counter kept from caller-declared transitions would be one more thing
+    /// a caller could make wrong. Indexers count verified entries from the walk.
     pub total_entries: u64,
-    pub total_verified: u64,
 }
 
 /// Domain separators. Distinct prefixes stop one kind of address ever colliding
@@ -703,4 +693,129 @@ pub fn decode_content_id(multibase: &str) -> Option<ContentId> {
         return None;
     }
     Some(out)
+}
+
+/// The registry's instructions, as the v0.3 guest decodes them.
+///
+/// One definition, borsh-encoded, shared by the guest, the SDK and the CLI, so
+/// a transaction the SDK builds is by construction one the guest decodes. The
+/// IDL in `idl/lez_registry.idl.json` describes this enum in SPEL's IDL format,
+/// and `tests/idl_drift.rs` fails if the two disagree.
+///
+/// Variants are append-only: borsh writes the variant index as the first byte.
+pub mod instruction {
+    use super::*;
+
+    /// Which entry an instruction is about: the program, and for a third-party
+    /// entry its publisher. `publisher: None` is the deployer's entry.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+    pub struct EntryKey {
+        pub program: ProgramId,
+        pub publisher: Option<AccountId>,
+    }
+
+    impl EntryKey {
+        /// The PDA seed of the entry account this key names.
+        #[must_use]
+        pub fn seed(&self) -> [u8; 32] {
+            match &self.publisher {
+                None => entry_seed(&self.program),
+                Some(p) => third_party_entry_seed(&self.program, p),
+            }
+        }
+    }
+
+    /// A program header as the client read it from chain. The guest checks it
+    /// against the header's loader shard before trusting a byte of it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+    pub struct HeaderView {
+        pub image_id: ImageId,
+        pub immutable: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+    pub enum Instruction {
+        /// Create the global counter. Permissionless; refuses a second time.
+        /// Accounts: `[global]`.
+        Initialize,
+        /// Register a program. Accounts:
+        /// `[entry, global, directory, program@loader, author]`.
+        ///
+        /// `key.publisher` is `None` for the deployer's entry, which requires
+        /// `author` to be the program's own header account, signing. Otherwise
+        /// it must equal `author`, who signs.
+        Register {
+            key: EntryKey,
+            header: HeaderView,
+            seq_index: u64,
+            at: Stamp,
+            name: String,
+            version: String,
+            description: String,
+            tags: Vec<String>,
+            /// Multibase `z...` Logos Storage identifier of the IDL, or empty.
+            idl: String,
+            /// The code pointer: source repository, commit and build config.
+            source: Option<SourceClaim>,
+        },
+        /// Change version, description and IDL pointer. Author only.
+        /// Accounts: `[entry, author]`.
+        Update {
+            key: EntryKey,
+            version: String,
+            description: String,
+            idl: String,
+        },
+        /// Replace the source claim; resets the verdict to `Claimed`.
+        /// Author only. Accounts: `[entry, author]`.
+        ClaimSource { key: EntryKey, claim: SourceClaim },
+        /// Record a rebuild's ImageID against the header on chain. Anyone may
+        /// attest; the attester is recorded. Accounts:
+        /// `[entry, program@loader, attester]`.
+        RecordRebuild {
+            key: EntryKey,
+            header: HeaderView,
+            rebuilt: ImageId,
+            at: Stamp,
+        },
+        /// Re-read the header; a changed ImageID makes a verdict `Stale`.
+        /// Permissionless. Accounts: `[entry, program@loader]`.
+        SyncHeader { key: EntryKey, header: HeaderView },
+        /// Freeze the entry's metadata forever. Author only.
+        /// Accounts: `[entry, author]`.
+        Freeze { key: EntryKey },
+    }
+
+    impl Instruction {
+        /// Variant names in declaration order, snake_case as the IDL names them.
+        pub const NAMES: [&'static str; 7] = [
+            "initialize",
+            "register",
+            "update",
+            "claim_source",
+            "record_rebuild",
+            "sync_header",
+            "freeze",
+        ];
+
+        #[must_use]
+        pub const fn index(&self) -> u8 {
+            match self {
+                Self::Initialize => 0,
+                Self::Register { .. } => 1,
+                Self::Update { .. } => 2,
+                Self::ClaimSource { .. } => 3,
+                Self::RecordRebuild { .. } => 4,
+                Self::SyncHeader { .. } => 5,
+                Self::Freeze { .. } => 6,
+            }
+        }
+    }
+
+    /// How far behind the including block a stamp may be, in blocks and in
+    /// milliseconds. The guest sets these as the transaction's validity
+    /// windows, which the runtime enforces: a stamp is never in the future and
+    /// never more than this much in the past.
+    pub const STAMP_BLOCK_WINDOW: u64 = 600;
+    pub const STAMP_MILLIS_WINDOW: u64 = 600_000;
 }
