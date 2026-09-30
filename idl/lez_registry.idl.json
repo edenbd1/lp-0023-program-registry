@@ -1,491 +1,250 @@
 {
-  "version": "0.1.0",
+  "version": "0.3.0",
   "name": "lez_registry",
+  "spec": "spel-idl",
+  "metadata": {
+    "name": "provenance",
+    "version": "0.3.0"
+  },
+  "instruction_type": "lez_registry_core::instruction::Instruction",
   "instructions": [
     {
       "name": "initialize",
+      "variant": "Initialize",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "global",
-          "writable": true,
-          "signer": false,
-          "init": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": "lez-registry:global:v1"
-              }
-            ]
-          }
-        }
+        { "name": "global", "writable": true, "signer": false, "init": true,
+          "pda": { "seeds": [ { "kind": "const", "value": "lez-registry:global:v1" } ] } }
       ],
       "args": []
     },
     {
       "name": "register",
+      "variant": "Register",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": true,
-          "signer": false,
-          "init": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "global",
-          "writable": true,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": "lez-registry:global:v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "directory",
-          "writable": true,
-          "signer": false,
-          "init": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "seq_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "clock",
-          "writable": false,
-          "signer": false,
-          "init": false
-        },
-        {
-          "name": "author",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": true },
+        { "name": "global", "writable": true, "signer": false, "init": false,
+          "pda": { "seeds": [ { "kind": "const", "value": "lez-registry:global:v1" } ] } },
+        { "name": "directory", "writable": true, "signer": false, "init": true },
+        { "name": "program", "writable": false, "signer": false, "init": false,
+          "owner": "JAQ5MVHbCkSYRzXunsrNuM2m1LS859PGveHfoYPAmcvZ" },
+        { "name": "author", "writable": false, "signer": true, "init": false }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "seq_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "program_id",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "canonical",
-          "type": "u8"
-        },
-        {
-          "name": "name",
-          "type": "string"
-        },
-        {
-          "name": "version",
-          "type": "string"
-        },
-        {
-          "name": "description",
-          "type": "string"
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } },
+        { "name": "header", "type": { "defined": "HeaderView" } },
+        { "name": "seq_index", "type": "u64" },
+        { "name": "at", "type": { "defined": "Stamp" } },
+        { "name": "name", "type": "string" },
+        { "name": "version", "type": "string" },
+        { "name": "description", "type": "string" },
+        { "name": "tags", "type": { "vec": "string" } },
+        { "name": "idl", "type": "string" },
+        { "name": "source", "type": { "option": { "defined": "SourceClaim" } } }
       ]
     },
     {
       "name": "update",
+      "variant": "Update",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": false,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "author",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": false },
+        { "name": "author", "writable": false, "signer": true, "init": false }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "version",
-          "type": "string"
-        },
-        {
-          "name": "description",
-          "type": "string"
-        },
-        {
-          "name": "idl",
-          "type": "string"
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } },
+        { "name": "version", "type": "string" },
+        { "name": "description", "type": "string" },
+        { "name": "idl", "type": "string" }
       ]
     },
     {
       "name": "claim_source",
+      "variant": "ClaimSource",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": false,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "global",
-          "writable": true,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": "lez-registry:global:v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "author",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": false },
+        { "name": "author", "writable": false, "signer": true, "init": false }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "repository",
-          "type": "string"
-        },
-        {
-          "name": "commit",
-          "type": {
-            "array": [
-              "u8",
-              20
-            ]
-          }
-        },
-        {
-          "name": "source_digest",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "image_digest",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "toolchain",
-          "type": "string"
-        },
-        {
-          "name": "network_disabled",
-          "type": "u8"
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } },
+        { "name": "claim", "type": { "defined": "SourceClaim" } }
       ]
     },
     {
       "name": "record_rebuild",
+      "variant": "RecordRebuild",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": false,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "global",
-          "writable": true,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": "lez-registry:global:v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "clock",
-          "writable": false,
-          "signer": false,
-          "init": false
-        },
-        {
-          "name": "attester",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": false },
+        { "name": "program", "writable": false, "signer": false, "init": false,
+          "owner": "JAQ5MVHbCkSYRzXunsrNuM2m1LS859PGveHfoYPAmcvZ" },
+        { "name": "attester", "writable": false, "signer": true, "init": false }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "rebuilt",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } },
+        { "name": "header", "type": { "defined": "HeaderView" } },
+        { "name": "rebuilt", "type": { "array": ["u8", 32] } },
+        { "name": "at", "type": { "defined": "Stamp" } }
       ]
     },
     {
-      "name": "claim_canonical",
+      "name": "sync_header",
+      "variant": "SyncHeader",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": false,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "global",
-          "writable": true,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": "lez-registry:global:v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "clock",
-          "writable": false,
-          "signer": false,
-          "init": false
-        },
-        {
-          "name": "challenger",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": false },
+        { "name": "program", "writable": false, "signer": false, "init": false,
+          "owner": "JAQ5MVHbCkSYRzXunsrNuM2m1LS859PGveHfoYPAmcvZ" }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "rebuilt",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } },
+        { "name": "header", "type": { "defined": "HeaderView" } }
       ]
     },
     {
       "name": "freeze",
+      "variant": "Freeze",
+      "execution": { "public": true, "private_owned": false },
       "accounts": [
-        {
-          "name": "entry",
-          "writable": false,
-          "signer": false,
-          "init": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "arg",
-                "path": "entry_seed"
-              }
-            ]
-          }
-        },
-        {
-          "name": "author",
-          "writable": false,
-          "signer": true,
-          "init": false
-        }
+        { "name": "entry", "writable": true, "signer": false, "init": false },
+        { "name": "author", "writable": false, "signer": true, "init": false }
       ],
       "args": [
-        {
-          "name": "entry_seed",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        }
+        { "name": "key", "type": { "defined": "EntryKey" } }
       ]
     }
   ],
   "accounts": [
     {
-      "name": "EntryAccount",
+      "name": "Entry",
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "entry",
-            "type": {
-              "vec": "u8"
-            }
-          }
+          { "name": "program_id", "type": { "array": ["u8", 32] } },
+          { "name": "image_id", "type": { "array": ["u8", 32] } },
+          { "name": "header_immutable", "type": "bool" },
+          { "name": "registered_at", "type": { "defined": "Stamp" } },
+          { "name": "name", "type": "string" },
+          { "name": "version", "type": "string" },
+          { "name": "author", "type": { "array": ["u8", 32] } },
+          { "name": "publisher", "type": { "defined": "Publisher" } },
+          { "name": "description", "type": "string" },
+          { "name": "tags", "type": { "vec": "string" } },
+          { "name": "idl", "type": { "option": { "array": ["u8", 38] } } },
+          { "name": "verification", "type": { "defined": "Verification" } },
+          { "name": "frozen", "type": "bool" }
         ]
       }
     },
     {
-      "name": "DirectoryAccount",
+      "name": "GlobalState",
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "program_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "entry_seed",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          }
+          { "name": "total_entries", "type": "u64" }
         ]
       }
     },
     {
-      "name": "GlobalAccount",
+      "name": "DirectorySlot",
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "total_entries",
-            "type": "u64"
-          },
-          {
-            "name": "total_verified",
-            "type": "u64"
-          }
+          { "name": "program_id", "type": { "array": ["u8", 32] } },
+          { "name": "entry_seed", "type": { "array": ["u8", 32] } }
         ]
       }
     }
+  ],
+  "types": [
+    {
+      "name": "EntryKey",
+      "kind": "struct",
+      "fields": [
+        { "name": "program", "type": { "array": ["u8", 32] } },
+        { "name": "publisher", "type": { "option": { "array": ["u8", 32] } } }
+      ]
+    },
+    {
+      "name": "HeaderView",
+      "kind": "struct",
+      "fields": [
+        { "name": "image_id", "type": { "array": ["u8", 32] } },
+        { "name": "immutable", "type": "bool" }
+      ]
+    },
+    {
+      "name": "Stamp",
+      "kind": "struct",
+      "fields": [
+        { "name": "block", "type": "u64" },
+        { "name": "millis", "type": "u64" }
+      ]
+    },
+    {
+      "name": "BuildEnvironment",
+      "kind": "struct",
+      "fields": [
+        { "name": "image_digest", "type": { "array": ["u8", 32] } },
+        { "name": "toolchain", "type": "string" },
+        { "name": "network_disabled", "type": "bool" }
+      ]
+    },
+    {
+      "name": "SourceClaim",
+      "kind": "struct",
+      "fields": [
+        { "name": "repository", "type": "string" },
+        { "name": "commit", "type": { "array": ["u8", 20] } },
+        { "name": "source_digest", "type": { "array": ["u8", 32] } },
+        { "name": "build", "type": { "defined": "BuildEnvironment" } }
+      ]
+    },
+    {
+      "name": "Publisher",
+      "kind": "enum",
+      "variants": [
+        { "name": "Canonical" },
+        { "name": "ThirdParty" }
+      ]
+    },
+    {
+      "name": "VerificationState",
+      "kind": "enum",
+      "variants": [
+        { "name": "Unclaimed" },
+        { "name": "Claimed" },
+        { "name": "Verified" },
+        { "name": "Unreproducible" },
+        { "name": "Mismatched" },
+        { "name": "Stale" }
+      ]
+    },
+    {
+      "name": "Verification",
+      "kind": "struct",
+      "fields": [
+        { "name": "state", "type": { "defined": "VerificationState" } },
+        { "name": "claim", "type": { "option": { "defined": "SourceClaim" } } },
+        { "name": "last_checked", "type": { "option": { "defined": "Stamp" } } },
+        { "name": "attester", "type": { "option": { "array": ["u8", 32] } } }
+      ]
+    }
+  ],
+  "errors": [
+    { "code": 9001, "name": "BadEntry", "msg": "entry fields are empty, too long, or fail to decode" },
+    { "code": 9002, "name": "NotInitialized", "msg": "the registry is not initialized" },
+    { "code": 9003, "name": "NotAuthor", "msg": "signer is not this entry's author" },
+    { "code": 9004, "name": "Immutable", "msg": "entry is frozen" },
+    { "code": 9005, "name": "WrongAccount", "msg": "an input is not the address this instruction derives" },
+    { "code": 9006, "name": "BadClaim", "msg": "source claim is missing, empty or too long" },
+    { "code": 9007, "name": "AlreadyVerified", "msg": "a mismatch assertion cannot erase a verification" },
+    { "code": 9008, "name": "AlreadyRegistered", "msg": "an entry (or the global account) already exists here" },
+    { "code": 9009, "name": "HeaderMismatch", "msg": "the program header on chain is not the one supplied" },
+    { "code": 9010, "name": "NotDeployer", "msg": "a deployer entry must be signed by the program's own header account" },
+    { "code": 9011, "name": "NotSigned", "msg": "a required signer did not sign" },
+    { "code": 9012, "name": "SlotMismatch", "msg": "seq_index is not the next directory slot" }
   ]
 }

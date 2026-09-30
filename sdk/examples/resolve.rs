@@ -3,53 +3,41 @@
 //!
 //! A wallet about to render a transaction, or an explorer decoding one, has one
 //! question: **what is this program, and is the source it names the source it
-//! was built from?** This is that, in about twenty lines of real code.
+//! was built from?** This is that, in about forty lines of real code.
 //!
-//! Run it: `cargo run --example resolve -p lez-registry-sdk -- <program-id-hex>`
+//! ```text
+//! LEZ_RPC=http://127.0.0.1:3040 \
+//! cargo run --example resolve -p lez-registry-sdk -- <REGISTRY> <PROGRAM>
+//! ```
+//!
+//! Both are account ids in base58, as the LEZ wallet prints them.
 
-use lez_registry_sdk::{base58, entry_address, Client, ProgramId, VerificationState};
-
-/// The registry to ask. A consumer would put their own here, or take it from
-/// configuration; there is nothing special about this one except that it is the
-/// one running on the public testnet.
-const REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
-const ENDPOINT: &str = "https://testnet.lez.logos.co";
-
-fn hex32(s: &str) -> Option<ProgramId> {
-    let s = s.trim().trim_start_matches("0x");
-    if s.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, b) in out.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(out)
-}
+use lez_registry_sdk::{base58, entry_address, hex, parse_account, Client, VerificationState};
 
 fn main() {
-    let arg = std::env::args().nth(1).unwrap_or_else(|| REGISTRY.into());
-    let Some(program) = hex32(&arg) else {
-        eprintln!("usage: resolve <program-id-hex>");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (Some(registry), Some(program)) = (
+        args.first().and_then(|s| parse_account(s)),
+        args.get(1).and_then(|s| parse_account(s)),
+    ) else {
+        eprintln!("usage: resolve <REGISTRY> <PROGRAM>");
         std::process::exit(2);
     };
-    let registry = hex32(REGISTRY).expect("built-in registry id is valid hex");
+    let endpoint = std::env::var("LEZ_RPC").unwrap_or_else(|_| "https://testnet.lez.logos.co".into());
 
-    // 1. Where the answer lives. This is a pure function of the two program ids
-    //    -- no request, no index, nothing that can be down or out of date.
+    // 1. Where the answer lives: a pure function of the two account ids. No
+    //    request, no index, nothing that can be down or out of date.
     let addr = entry_address(&registry, &program);
     println!("entry account  {}", base58(&addr));
 
-    // 2. Read it.
-    let client = Client::new(ENDPOINT, registry);
+    // 2. Read it, and the program's header, from the chain.
+    let client = Client::new(endpoint, registry);
     let entry = match client.entry(&program) {
         Ok(Some(e)) => e,
-        // Not an error. A derived address always exists; what separates a
-        // registered program from an unregistered one is whether anything was
-        // written there. A wallet renders this as "unknown program", which is a
-        // truthful thing to tell a user about to sign.
+        // Not an error: render it as an unknown program, which is a truthful
+        // thing to tell a user about to sign.
         Ok(None) => {
-            println!("not registered — render this as an unknown program");
+            println!("not registered: render this as an unknown program");
             return;
         }
         Err(e) => {
@@ -57,67 +45,45 @@ fn main() {
             std::process::exit(1);
         }
     };
-
     println!("name           {} {}", entry.name, entry.version);
     println!("description    {}", entry.description);
-    if let Some(idl) = entry.idl {
-        // The IDL itself lives on Logos Storage; the entry holds the identifier.
-        // Fetch it to decode calldata into named arguments.
-        println!("idl            {}", base58_cid(&idl));
+    match entry.idl {
+        // The IDL itself lives on Logos Storage; the entry holds its identifier.
+        // An unresolvable IDL is shown as unavailable; the metadata above stands.
+        Some(idl) => println!("idl            {}", hex(&idl)),
+        None => println!("idl            unavailable"),
     }
 
-    // 3. The part that decides what a UI is allowed to say.
-    match entry.verification.state {
+    // 3. Is the verdict still about the bytecode that runs? On v0.3 a mutable
+    //    header can be repointed, so compare the entry's recorded ImageID with
+    //    the header as it is now.
+    let live = client.program_header(&program).ok().flatten();
+    let current = live.is_some_and(|h| h.image_id == entry.image_id);
+
+    // 4. The part that decides what a UI is allowed to say.
+    let verdict = match entry.verification.state {
+        _ if !current => "the program was redeployed since this entry looked: treat as unverified",
         VerificationState::Verified if entry.verification.is_self_attested(&entry.author) => {
-            println!("verification   verified, but only by the party that shipped it");
+            "verified, but only by the party that shipped it"
         }
-        VerificationState::Verified => {
-            println!("verification   verified by an independent rebuild");
-        }
-        VerificationState::Mismatched => {
-            println!("verification   MISMATCHED — a source is published and does not rebuild");
-        }
-        VerificationState::Unreproducible => {
-            println!(
-                "verification   a rebuild was tried with the network up, so it proves nothing"
-            );
-        }
-        VerificationState::Claimed => {
-            println!("verification   a source is claimed, nobody rebuilt it")
-        }
-        VerificationState::Unclaimed => println!("verification   no source claimed"),
+        VerificationState::Verified => "verified by an independent rebuild",
+        VerificationState::Mismatched => "MISMATCHED: a source is published and does not rebuild",
+        VerificationState::Unreproducible => "a rebuild was tried with the network up, so it proves nothing",
+        VerificationState::Claimed => "a source is claimed, nobody rebuilt it",
+        VerificationState::Unclaimed => "no source claimed",
+        VerificationState::Stale => "verified once, but against bytecode that no longer runs",
+    };
+    println!("verification   {verdict}");
+    if entry.header_immutable {
+        println!("header         immutable: this verdict can never go stale");
     }
     if let Some(who) = entry.verification.attester {
         println!("attested by    {}", base58(&who));
     }
     if let Some(claim) = &entry.verification.claim {
-        println!("source         {}", claim.repository);
+        println!("source         {} @ {}", claim.repository, hex(&claim.commit));
     }
-
-    // Say this wherever the state is shown. Verified means the deployed bytecode
-    // was produced from the stated source; it says nothing about whether that
-    // source is safe, audited or benign.
+    // Verified means the deployed bytecode was produced from the stated source;
+    // it says nothing about whether that source is safe, audited or benign.
     println!("\nVerified is not safe. It means the bytecode matches the source, nothing more.");
-}
-
-/// A content identifier renders as multibase base58btc — the `z…` a Logos
-/// Storage node accepts.
-fn base58_cid(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut digits: Vec<u8> = Vec::new();
-    for &byte in bytes {
-        let mut carry = u32::from(byte);
-        for d in &mut digits {
-            carry += u32::from(*d) << 8;
-            *d = (carry % 58) as u8;
-            carry /= 58;
-        }
-        while carry > 0 {
-            digits.push((carry % 58) as u8);
-            carry /= 58;
-        }
-    }
-    let mut out = String::from("z");
-    out.extend(digits.iter().rev().map(|d| ALPHABET[*d as usize] as char));
-    out
 }
