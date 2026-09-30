@@ -1,131 +1,174 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Registry CLI.
+//! `lez-registry`: the Provenance registry CLI, for LEZ v0.3.
 //!
-//! It computes addresses, verifies builds, and now **builds `register` and
-//! `update` transactions in process** — the accounts in the order the program
-//! reads them and the risc0-serde instruction words, produced by the SDK rather
-//! than assembled by `spel` from an IDL. What it does not do is hold a key: the
-//! built transaction is handed to a wallet-backed signer, because a key belongs
-//! where an operator can see what they are signing, not in a tool that also
-//! prints addresses.
+//! Register, update, look up, search and verify programs. Every address it
+//! prints or writes to is derived by `lez-registry-core`, the crate the on-chain
+//! program links, and every transaction is built and signed by
+//! `lez-registry-sdk`. Keys are 32-byte secrets in hex files, the form
+//! `wallet account import public --private-key` takes, so the same account can
+//! be driven from the LEZ wallet and from here.
 //!
-//! Everything it prints comes from `lez-registry-core` and `lez-registry-sdk`,
-//! the same crates the on-chain program and the read path link, so an address
-//! this tool shows is the address the program will insist on and the bytes it
-//! emits are the bytes the program decodes.
+//! On v0.3 a program call that fails is charged and reverted but still lands in
+//! a block, so after every write this tool reads the chain back and reports
+//! what actually changed. "included" alone is never printed as success.
 
 mod local;
+
 use lez_registry_core as core_;
 use lez_registry_sdk::{
-    build_register, build_update, BuiltTransaction, RegisterRequest, UpdateRequest,
+    self as sdk, base58, hex, parse_account, BuiltTransaction, Client, EntryKey, Keypair,
 };
 use std::process::ExitCode;
 
-const BASE58: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-fn to_base58(bytes: &[u8; 32]) -> String {
-    let mut n = [0u8; 32];
-    n.copy_from_slice(bytes);
-    let mut out = Vec::new();
-    let mut value = n.to_vec();
-    while value.iter().any(|&b| b != 0) {
-        let mut rem = 0u32;
-        for byte in value.iter_mut() {
-            let cur = rem * 256 + u32::from(*byte);
-            *byte = (cur / 58) as u8;
-            rem = cur % 58;
-        }
-        out.push(BASE58[rem as usize]);
-    }
-    for &b in bytes.iter() {
-        if b != 0 {
-            break;
-        }
-        out.push(BASE58[0]);
-    }
-    out.reverse();
-    String::from_utf8(out).expect("base58 alphabet is ascii")
-}
-
-fn from_hex(s: &str) -> Option<[u8; 32]> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
-        out[i] = u8::from_str_radix(std::str::from_utf8(chunk).ok()?, 16).ok()?;
-    }
-    Some(out)
-}
+const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
 
 fn usage() -> ExitCode {
     eprintln!(
         "\
-lez-registry — Provenance, the LEZ program registry: addresses and build verification
+lez-registry: Provenance, the program registry for LEZ v0.3
 
-  deployment-digest <FILE>
-        SHA256(len_le ‖ bytes) — what the DEPLOY TRANSACTION hashes to. Use it
-        to check that the file you hold is the file that was deployed.
+Connection (every chain command):
+  --rpc <URL>           sequencer RPC (env LEZ_RPC, default {DEFAULT_ENDPOINT})
+  --registry <ACCOUNT>  registry program account (env PROVENANCE_REGISTRY)
+Keys are files holding a 64-hex-character secret:
+  --key <FILE>          the signing author or attester
+  --payer <FILE>        the fee payer, an account holding LGO
+Accounts are base58 (as the wallet prints them, `Public/` optional) or hex.
 
-        This is NOT the program id. A program is called by its RISC0 ImageID,
-        derived from the ELF rather than from the packaged file; read that with
-        `spel program-id`. Keying a registry on the wrong one of these would
-        resolve nothing, so this tool refuses to blur them.
-
-  entry-address <PROGRAM_ID_HEX> [--publisher <ACCOUNT_ID_HEX>]
-        Where the entry lives. Without --publisher this is the canonical
-        address, a function of the program id alone — so a client resolves a
-        program by computing, never by asking an index. With --publisher it is
-        that party's third-party entry, which is why a stranger can never
-        occupy the canonical one.
-
+Read
+  lookup <PROGRAM> [--publisher <ACCOUNT>]   resolve an entry: one hash, one read
+  list                                       every entry, in registration order
+  search <TEXT>                              match name, version, description, tags, author
+  program-header <PROGRAM>                   the header the loader holds: ImageID, frozen flag
+  entry-address <PROGRAM> [--publisher <ACCOUNT>]
   global-address
-        The singleton registry-state address.
 
-  verify <FILE> --expect <PROGRAM_ID_HEX>
-        Does this bytecode's deployment digest match the one given? Necessary
-        and not sufficient: see `verify --explain`.
+Write
+  init --payer <FILE>
+  register <PROGRAM> --name <N> --version <V> [--description <D>] [--tag <T>]...
+           [--idl <CID>] [--repo <URL> --commit <HEX40> --source-digest <HEX>
+            --image-digest <HEX> --toolchain <T> [--offline]]
+           --key <FILE> --payer <FILE> [--third-party] [--submit-anyway]
+        Without --third-party this is the deployer's entry, and --key must be the
+        program's own header key: the chain refuses anything else, and so does
+        this tool unless --submit-anyway asks to watch the chain do it.
+  update <PROGRAM> [--publisher <ACCOUNT>] --version <V> [--description <D>] [--idl <CID>]
+           --key <FILE> --payer <FILE>
+  claim-source <PROGRAM> [--publisher <ACCOUNT>] --repo <URL> --commit <HEX40>
+           --source-digest <HEX> --image-digest <HEX> --toolchain <T> [--offline]
+           --key <FILE> --payer <FILE>
+  record-rebuild <PROGRAM> [--publisher <ACCOUNT>] (--file <BIN> | --image <HEX>)
+           --key <FILE> --payer <FILE>
+  sync-header <PROGRAM> [--publisher <ACCOUNT>] --payer <FILE>
+  freeze <PROGRAM> [--publisher <ACCOUNT>] --key <FILE> --payer <FILE>
 
-  verify <FILE> --expect <DIGEST_HEX> --mark --program <PROGRAM_ID_HEX>
-        On a match, also record on THIS machine that you rebuilt the program
-        and it matched — locally verified, for you. Nothing goes on chain.
-        --program names the program the mark is for (its id, which `lookup`
-        keys on); --expect stays the deployment digest the file is checked
-        against. The two are different numbers, and a mark keyed on the
-        digest would never be found again.
+Verify locally
+  image-id <BIN>                             the RISC0 ImageID of a built guest
+  verify <BIN> --program <PROGRAM> [--mark]  does your rebuild run at that program id?
+  local-verified                             your own marks, never on chain
+  idl <CID> [--from <DIR>]                   check an IDL pointer, and resolve it offline
 
-  local-verified
-        List the programs you marked locally verified, and where the marks live.
-
-  program-header <PROGRAM_ACCOUNT> [--image <IMAGE_ID_HEX>] --endpoint <URL>
-        LEZ 0.3: read the program's header from chain — the ImageID the runtime
-        recomputed from its bytecode, and whether it is frozen. With --image
-        (the ImageID hex bytes `spel program-id` prints for your rebuild),
-        say whether your rebuild is the program running at that account.
-
-  verify --explain
-        Why a hash match is not proof of provenance.
-
-  register <PROGRAM_ID_HEX> --name <N> --version <V> --author <ACCT>
-           [--description <D>] [--third-party] [--clock <ACCT>] [--seq-index <N>]
-        Build the register transaction in process — no `spel`. Accounts and the
-        instruction words come from the SDK's builder; the entry address is
-        re-derived, never chosen. Canonical by default; --third-party keys the
-        entry by --author instead. --seq-index defaults to the chain's current
-        total_entries. Prints the unsigned transaction for a wallet to sign.
-
-  update <PROGRAM_ID_HEX> --version <V> --author <ACCT>
-           [--description <D>] [--idl <CONTENT_ID>] [--third-party]
-        Build the update transaction in process. Rewrites version, description
-        and the IDL pointer (empty --idl clears it). Only the recorded author
-        may update; this checks the on-chain author first and refuses to pretend
-        otherwise. Prints the unsigned transaction for a wallet to sign.
-
-An account (--author, --clock) is hex or base58. Submission is a wallet's job:
-this tool constructs the exact bytes and stops at the signature."
+Keys
+  keygen [--out <FILE>]                      a fresh public-account key"
     );
     ExitCode::from(2)
+}
+
+fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1))
+}
+
+fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a String> {
+    args.iter()
+        .enumerate()
+        .filter(|(_, a)| *a == name)
+        .filter_map(|(i, _)| args.get(i + 1))
+        .collect()
+}
+
+fn has(args: &[String], name: &str) -> bool {
+    args.iter().any(|a| a == name)
+}
+
+fn fail(msg: impl std::fmt::Display) -> ExitCode {
+    eprintln!("error: {msg}");
+    ExitCode::FAILURE
+}
+
+fn client(args: &[String]) -> Result<Client, String> {
+    let rpc = flag(args, "--rpc")
+        .cloned()
+        .or_else(|| std::env::var("LEZ_RPC").ok())
+        .unwrap_or_else(|| DEFAULT_ENDPOINT.into());
+    let reg = flag(args, "--registry")
+        .cloned()
+        .or_else(|| std::env::var("PROVENANCE_REGISTRY").ok())
+        .ok_or("--registry <ACCOUNT> (or PROVENANCE_REGISTRY) is required")?;
+    let reg = parse_account(&reg).ok_or("--registry is not a 32-byte account id")?;
+    Ok(Client::new(rpc, reg))
+}
+
+fn key_from(args: &[String], name: &str) -> Result<Keypair, String> {
+    let path = flag(args, name).ok_or(format!("{name} <FILE> is required"))?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    Keypair::from_hex(text.trim()).ok_or(format!("{path} does not hold a 64-hex-character secret"))
+}
+
+fn program_arg(args: &[String]) -> Result<[u8; 32], String> {
+    args.get(1)
+        .and_then(|s| parse_account(s))
+        .ok_or_else(|| "the first argument must be a program account id".into())
+}
+
+/// The entry key a command names: the deployer's entry unless `--publisher`.
+fn key_arg(args: &[String]) -> Result<EntryKey, String> {
+    let program = program_arg(args)?;
+    let publisher = match flag(args, "--publisher") {
+        Some(p) => Some(parse_account(p).ok_or("--publisher is not an account id")?),
+        None => None,
+    };
+    Ok(EntryKey { program, publisher })
+}
+
+fn hex_n<const N: usize>(s: &str, what: &str) -> Result<[u8; N], String> {
+    let s = s.trim().strip_prefix("0x").unwrap_or(s.trim());
+    if s.len() != N * 2 {
+        return Err(format!("{what} must be {} hex characters", N * 2));
+    }
+    let mut out = [0u8; N];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|_| format!("{what} is not hex"))?;
+    }
+    Ok(out)
+}
+
+/// A source claim from flags, if `--repo` was given.
+fn claim_from(args: &[String]) -> Result<Option<core_::SourceClaim>, String> {
+    let Some(repo) = flag(args, "--repo") else {
+        return Ok(None);
+    };
+    let need = |n: &str| flag(args, n).ok_or(format!("{n} is required with --repo"));
+    Ok(Some(core_::SourceClaim {
+        repository: repo.clone(),
+        commit: hex_n::<20>(need("--commit")?, "--commit")?,
+        source_digest: hex_n::<32>(need("--source-digest")?, "--source-digest")?,
+        build: core_::BuildEnvironment {
+            image_digest: hex_n::<32>(need("--image-digest")?, "--image-digest")?,
+            toolchain: need("--toolchain")?.clone(),
+            network_disabled: has(args, "--offline"),
+        },
+    }))
+}
+
+/// The ImageID of a built guest: what the loader records in a header built
+/// from it, with the protocol's default kernel.
+fn image_id_of(path: &str) -> Result<[u8; 32], String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let digest = risc0_binfmt::compute_image_id(&bytes)
+        .map_err(|e| format!("{path} is not a RISC0 program binary: {e}"))?;
+    let mut out = [0u8; 32];
+    out.copy_from_slice(digest.as_bytes());
+    Ok(out)
 }
 
 fn main() -> ExitCode {
@@ -133,505 +176,204 @@ fn main() -> ExitCode {
     let Some(cmd) = args.first().map(String::as_str) else {
         return usage();
     };
-
-    match cmd {
-        "deployment-digest" => {
-            let Some(path) = args.get(1) else {
-                return usage();
-            };
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    let id = core_::deployment_digest(&bytes);
-                    println!("{}", hex(&id));
-                    println!("  {} bytes", bytes.len());
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("cannot read {path}: {e}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
-        "entry-address" => {
-            let Some(pid) = args.get(1).and_then(|s| from_hex(s)) else {
-                eprintln!("program id must be 64 hex characters");
-                return ExitCode::FAILURE;
-            };
-            let publisher = args
-                .iter()
-                .position(|a| a == "--publisher")
-                .and_then(|i| args.get(i + 1))
-                .and_then(|s| from_hex(s));
-            let seed = match publisher {
-                Some(p) => core_::third_party_entry_seed(&pid, &p),
-                None => core_::entry_seed(&pid),
-            };
-            // The seed is not the address. It was printed as one here, under a
-            // heading that said "where the entry lives", and the base58 beside
-            // it was the base58 of the *seed* -- a well-formed account id that
-            // holds nothing. Found by running the commands the README documents.
-            //
-            // Both are printed because both are needed: the account to read, and
-            // the seed to pass to `spel --entry-seed`, which takes the seed and
-            // derives the address itself.
-            let registry = match args
-                .iter()
-                .position(|a| a == "--registry")
-                .and_then(|i| args.get(i + 1))
-                .map_or(Some(DEFAULT_REGISTRY.to_owned()), |s| Some(s.clone()))
-                .as_deref()
-                .and_then(from_hex)
-            {
-                Some(r) => r,
-                None => {
-                    eprintln!("--registry takes 64 hex characters");
-                    return ExitCode::FAILURE;
-                }
-            };
-            println!("{}", to_base58(&lez_registry_sdk::pda(&registry, &seed)));
-            println!("  the account to read");
-            println!("  seed   {}", hex(&seed));
-            println!("  pass the seed to `spel --entry-seed`, which derives the address itself");
-            println!(
-                "  {}",
-                if publisher.is_some() {
-                    "third-party entry — one per publisher, so these never collide"
-                } else {
-                    "canonical entry — exactly one, derivable from the program id alone"
-                }
-            );
+    let r = match cmd {
+        "keygen" => keygen(&args),
+        "image-id" => image_id_cmd(&args),
+        "entry-address" => entry_address_cmd(&args),
+        "global-address" => client(&args).map(|c| {
+            println!("{}", base58(&sdk::global_address(c.registry())));
             ExitCode::SUCCESS
-        }
-        "global-address" => {
-            let seed = core_::global_seed();
-            println!("{}", hex(&seed));
-            println!("  base58 {}", to_base58(&seed));
-            ExitCode::SUCCESS
-        }
-        "explain-entry" => explain_entry(&args),
-        "lookup" => lookup_cmd(&args),
-        "search" => search_cmd(&args),
-        "idl" => idl_cmd(&args),
-        "verify" => verify(&args),
-        "local-verified" => local_verified_cmd(),
+        }),
         "program-header" => program_header_cmd(&args),
+        "lookup" => lookup_cmd(&args),
+        "list" => search_cmd(&args, ""),
+        "search" => search_cmd(&args, args.get(1).map_or("", String::as_str)),
+        "init" => init_cmd(&args),
         "register" => register_cmd(&args),
         "update" => update_cmd(&args),
-        _ => usage(),
-    }
+        "claim-source" => claim_source_cmd(&args),
+        "record-rebuild" => record_rebuild_cmd(&args),
+        "sync-header" => sync_header_cmd(&args),
+        "freeze" => freeze_cmd(&args),
+        "verify" => verify_cmd(&args),
+        "local-verified" => Ok(local_verified_cmd()),
+        "idl" => Ok(idl_cmd(&args)),
+        _ => return usage(),
+    };
+    r.unwrap_or_else(fail)
 }
 
-fn verify(args: &[String]) -> ExitCode {
-    if args.iter().any(|a| a == "--explain") {
-        println!(
-            "\
-A hash match proves the bytecode you have is the bytecode deployed. It does not
-prove where that bytecode came from.
-
-Solana's verified builds were subverted by a repository whose build.rs
-downloaded the already-deployed binary at compile time and emitted it. The
-rebuild matched perfectly and the source proved nothing.
-
-So this registry records whether a rebuild ran with the network disabled, and a
-claim built with network access cannot reach Verified — it stops at
-Unreproducible. That is a different state, not a softer word for the same one.
-
-Verification is bound to one artifact, which here costs no machinery: an entry
-is keyed by its ImageID, so an upgraded program is a different key and therefore
-a different entry, starting Unclaimed. There is no way to inherit a badge earned
-by code that is no longer running, and no Stale state to display, because the
-bytecode under an entry cannot be replaced.
-
-Two numbers, kept apart on purpose:
-  ProgramId         the RISC0 ImageID -- what a program is called by
-  deployment digest SHA256(len_le || bytes) -- what the deploy tx hashes to
-The second is not the first. This tool checks the second and says so."
-        );
-        return ExitCode::SUCCESS;
-    }
-    let Some(path) = args.get(1) else {
-        return usage();
-    };
-    let Some(expected) = args
-        .iter()
-        .position(|a| a == "--expect")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|s| from_hex(s))
-    else {
-        eprintln!("--expect <PROGRAM_ID_HEX> is required");
-        return ExitCode::FAILURE;
-    };
-    let Ok(bytes) = std::fs::read(path) else {
-        eprintln!("cannot read {path}");
-        return ExitCode::FAILURE;
-    };
-    let got = core_::deployment_digest(&bytes);
-    if got == expected {
-        println!("match   {}", hex(&got));
-        println!("  the bytecode in {path} is what is deployed.");
-        println!("  this is necessary, not sufficient — run `verify --explain`.");
-        if args.iter().any(|a| a == "--mark") {
-            use sha2::Digest as _;
-            let Some(program) = args
-                .iter()
-                .position(|a| a == "--program")
-                .and_then(|i| args.get(i + 1))
-                .and_then(|s| from_hex(s))
-            else {
-                eprintln!("  --mark needs --program <PROGRAM_ID_HEX>: the id the mark is for");
-                return ExitCode::FAILURE;
-            };
-            let mark = local::Mark {
-                program_id: hex(&program),
-                digest: hex(&got),
-                file_sha256: sha2::Sha256::digest(&bytes)
-                    .iter()
-                    .map(|x| format!("{x:02x}"))
-                    .collect(),
-                marked_at: local::now(),
-            };
-            match local::add(&mark) {
-                Ok(at) => println!(
-                    "  marked locally verified, for you only, in {}",
-                    at.display()
-                ),
-                Err(e) => {
-                    eprintln!("  the match stands, but the mark could not be written: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
+fn keygen(args: &[String]) -> Result<ExitCode, String> {
+    let k = Keypair::generate();
+    match flag(args, "--out") {
+        Some(path) => {
+            std::fs::write(path, format!("{}\n", k.secret_hex()))
+                .map_err(|e| format!("cannot write {path}: {e}"))?;
+            println!("{}", base58(&k.account_id()));
+            println!("  secret written to {path}");
         }
-        ExitCode::SUCCESS
-    } else {
-        println!("MISMATCH");
-        println!("  built    {}", hex(&got));
-        println!("  expected {}", hex(&expected));
-        ExitCode::FAILURE
-    }
-}
-
-fn hex(b: &[u8; 32]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
-/// Decode an entry and report what its state supports, rather than whether it
-/// carries a badge.
-fn explain_entry(args: &[String]) -> ExitCode {
-    let Some(raw) = args.get(1) else {
-        eprintln!(
-            "explain-entry <HEX> — the `entry` field from `spel inspect --type EntryAccount`"
-        );
-        return ExitCode::FAILURE;
-    };
-    let bytes = match parse_hex_blob(raw.trim()) {
-        Some(b) => b,
         None => {
-            eprintln!("not hex");
-            return ExitCode::FAILURE;
+            println!("{}", base58(&k.account_id()));
+            println!("  secret {}", k.secret_hex());
         }
-    };
-    let e: core_::Entry = match borsh::from_slice(&bytes) {
-        Ok(e) => e,
-        Err(err) => {
-            eprintln!("does not decode as an Entry: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
+    }
+    Ok(ExitCode::SUCCESS)
+}
 
+fn image_id_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let path = args.get(1).ok_or("image-id <BIN>")?;
+    println!("{}", hex(&image_id_of(path)?));
+    Ok(ExitCode::SUCCESS)
+}
+
+fn entry_address_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let key = key_arg(args)?;
+    println!("{}", base58(&sdk::key_address(c.registry(), &key)));
+    println!(
+        "  {}",
+        if key.publisher.is_some() {
+            "third-party entry: one per publisher, so these never collide"
+        } else {
+            "deployer entry: exactly one, derivable from the program id alone"
+        }
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn program_header_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let program = program_arg(args)?;
+    match c.program_header(&program).map_err(|e| e.to_string())? {
+        Some(h) => {
+            println!("image id  {}", hex(&h.image_id));
+            println!(
+                "header    {}",
+                if h.immutable {
+                    "immutable: can never be repointed, so a match cannot go stale"
+                } else {
+                    "mutable: the deployer may repoint it; re-check after any update"
+                }
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        None => {
+            println!("no program header at {}", base58(&program));
+            Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
+fn state_line(e: &core_::Entry) -> String {
+    use core_::VerificationState as S;
+    match e.verification.state {
+        S::Verified if e.verification.is_self_attested(&e.author) => "verified (by its own author)".into(),
+        S::Verified => "verified".into(),
+        S::Mismatched => "MISMATCHED".into(),
+        S::Unreproducible => "unreproducible".into(),
+        S::Claimed => "claimed".into(),
+        S::Unclaimed => "unclaimed".into(),
+        S::Stale => "stale (header repointed since the verdict)".into(),
+    }
+}
+
+fn print_entry(e: &core_::Entry) {
     println!("{} {}", e.name, e.version);
-    println!("  program id   {}", hex(&e.program_id));
-    println!("  author       {}", hex(&e.author));
+    println!("  program      {}", base58(&e.program_id));
     println!(
         "  publisher    {}",
         match e.publisher {
-            core_::Publisher::Canonical => "canonical",
+            core_::Publisher::Canonical => "deployer (signed by the program's header account)",
             core_::Publisher::ThirdParty => "third party",
         }
     );
-    if e.frozen {
-        println!("  frozen       yes — metadata is immutable");
+    println!("  author       {}", base58(&e.author));
+    println!(
+        "  image id     {}{}",
+        hex(&e.image_id),
+        if e.header_immutable { "  (header immutable)" } else { "  (header mutable)" }
+    );
+    if !e.description.is_empty() {
+        println!("  description  {}", e.description);
     }
-
-    match &e.verification.state {
-        core_::VerificationState::Unclaimed => {
-            println!("  verification unclaimed");
-            println!("               Nobody has said where the source is. This is the honest");
-            println!("               default, not a failure.");
-        }
-        core_::VerificationState::Claimed => {
-            println!("  verification claimed, NOT verified");
-            println!("               A source is asserted and nobody has rebuilt it. Typing a");
-            println!("               URL is not evidence.");
-        }
-        core_::VerificationState::Mismatched => {
-            println!("  verification MISMATCHED — a source was published and does not rebuild");
-            println!("               This is a stronger negative signal than no claim at all:");
-            println!("               somebody said where the source is, and it does not produce");
-            println!("               this bytecode. Do not read it as merely unverified.");
-            if let Some(a) = e.verification.attester {
-                println!("               found by {}", hex(&a));
-            }
-        }
-        core_::VerificationState::Unreproducible => {
-            println!("  verification unreproducible");
-            println!("               A rebuild was recorded but the claimed build had network");
-            println!("               access, so a match would prove nothing about the source.");
-            // Who tried matters most in exactly this case: it separates a claim
-            // nobody has looked at from one that was examined and did not hold.
-            if let Some(a) = e.verification.attester {
-                println!("               attempted by {}", hex(&a));
-            }
-        }
-        core_::VerificationState::Verified => {
-            let attester = e.verification.attester;
-            if e.verification.is_self_attested(&e.author) {
-                println!("  verification verified — BY ITS OWN AUTHOR");
-                println!("               The only party vouching for this build is the party");
-                println!("               that shipped it. Useful, and not an independent check.");
-            } else {
-                println!("  verification verified");
-                match attester {
-                    Some(a) => println!("               attested by {}", hex(&a)),
-                    // Unreachable through this crate's own API, which always
-                    // writes the attester alongside the state. Printed rather
-                    // than asserted because the data may come from a chain
-                    // account written by some other implementation.
-                    None => println!("               attested by nobody — treat as unverified"),
-                }
-            }
-        }
+    if !e.tags.is_empty() {
+        println!("  tags         {}", e.tags.join(", "));
+    }
+    match &e.idl {
+        Some(id) => println!("  idl          {}", encode_content_id(id)),
+        None => println!("  idl          none"),
+    }
+    println!("  verification {}", state_line(e));
+    if let Some(a) = e.verification.attester {
+        println!("  attester     {}", base58(&a));
+    }
+    if let Some(cl) = &e.verification.claim {
+        println!("  source       {} @ {}", cl.repository, hex(&cl.commit));
+        println!(
+            "  build        {} (network {})",
+            cl.build.toolchain,
+            if cl.build.network_disabled { "disabled" } else { "ENABLED" }
+        );
     }
     println!(
         "  registered   block {} ({} ms)",
         e.registered_at.block, e.registered_at.millis
     );
-    // Printed next to the verdict so staleness is the reader's to judge rather
-    // than something this tool decides on their behalf.
-    match e.verification.last_checked {
-        Some(s) => println!("  last checked block {} ({} ms)", s.block, s.millis),
-        None => println!("  last checked never"),
+    if let Some(s) = e.verification.last_checked {
+        println!("  last checked block {} ({} ms)", s.block, s.millis);
     }
-    if let Some(c) = &e.verification.claim {
-        println!("  repository   {}", c.repository);
-        println!("  toolchain    {}", c.build.toolchain);
-        println!("  offline      {}", c.build.network_disabled);
+    if e.frozen {
+        println!("  frozen       yes: metadata can never change again");
     }
-    ExitCode::SUCCESS
 }
 
-fn parse_hex_blob(s: &str) -> Option<Vec<u8>> {
-    let s = s.trim_start_matches("0x");
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-        .collect()
-}
-
-/// Check a content identifier, and resolve it when told where to look.
-fn idl_cmd(args: &[String]) -> ExitCode {
-    let Some(raw) = args.get(1) else {
-        eprintln!("idl <CONTENT_ID> [--from <DIR-OR-URL-PREFIX>]");
-        return ExitCode::FAILURE;
-    };
-    let Some(id) = core_::decode_content_id(raw.trim()) else {
-        eprintln!(
-            "not a multibase base58btc content identifier.\n\
-             A Logos Storage identifier starts with `z` and decodes to {} bytes.",
-            core_::CONTENT_ID_LEN
-        );
-        return ExitCode::FAILURE;
-    };
-    println!("content id   {}", raw.trim());
-    println!("  bytes      {}", hex_n(&id));
-    println!("  cid version {}", id[0]);
-    println!("  codec      {}", hex_n(&id[1..4]));
-    println!("  digest     {}", hex_n(&id[6..]));
-
-    let Some(from) = args
-        .iter()
-        .position(|a| a == "--from")
-        .and_then(|i| args.get(i + 1))
-    else {
-        println!("\n  no --from given, so nothing was fetched. The identifier is well formed;");
-        println!("  that is a different claim from the IDL being available.");
-        return ExitCode::SUCCESS;
-    };
-
-    // A directory is the offline backend and an http(s) prefix is the online
-    // one. Both are just "where the bytes are"; the check that matters is the
-    // same either way.
-    let body = if from.starts_with("http://") || from.starts_with("https://") {
-        eprintln!("\n  fetching over http is not wired in this build; pass a directory");
-        return ExitCode::FAILURE;
-    } else {
-        match std::fs::read(std::path::Path::new(from).join(raw.trim())) {
-            Ok(b) => b,
-            Err(e) => {
-                // Unresolvable is a normal outcome, not a crash: an entry whose
-                // IDL cannot be fetched still has good on-chain metadata.
-                println!("\n  IDL unavailable: {e}");
-                println!("  The entry's on-chain metadata is unaffected.");
-                return ExitCode::SUCCESS;
-            }
+/// Multibase base58btc, the form a Logos Storage node accepts.
+fn encode_content_id(id: &core_::ContentId) -> String {
+    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits: Vec<u8> = Vec::new();
+    for &byte in id {
+        let mut carry = u32::from(byte);
+        for d in &mut digits {
+            carry += u32::from(*d) << 8;
+            *d = (carry % 58) as u8;
+            carry /= 58;
         }
-    };
-
-    match serde_json_parses(&body) {
-        true => {
-            println!("\n  resolved, {} bytes, parses as JSON", body.len());
-            ExitCode::SUCCESS
-        }
-        false => {
-            println!(
-                "\n  resolved, {} bytes, but it does NOT parse as JSON",
-                body.len()
-            );
-            println!("  Treat the IDL as unavailable rather than trusting a partial parse.");
-            ExitCode::SUCCESS
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
         }
     }
+    let mut s = String::from("z");
+    s.extend(std::iter::repeat_n('1', id.iter().take_while(|b| **b == 0).count()));
+    s.extend(digits.iter().rev().map(|d| ALPHABET[*d as usize] as char));
+    s
 }
 
-/// Minimal JSON well-formedness check.
-///
-/// Deliberately not a parser into a typed IDL: the criterion is that a client
-/// can tell a usable IDL from an unusable one, and pulling a JSON crate into a
-/// tool whose whole argument is "few dependencies you have to trust" would be a
-/// poor trade for that.
-fn serde_json_parses(bytes: &[u8]) -> bool {
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return false;
-    };
-    let text = text.trim();
-    if !(text.starts_with('{') || text.starts_with('[')) {
-        return false;
-    }
-    let (mut depth, mut in_string, mut escaped) = (0i32, false, false);
-    for c in text.chars() {
-        if in_string {
-            match c {
-                _ if escaped => escaped = false,
-                '\\' => escaped = true,
-                '"' => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-        match c {
-            '"' => in_string = true,
-            '{' | '[' => depth += 1,
-            '}' | ']' => {
-                depth -= 1;
-                if depth < 0 {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    depth == 0 && !in_string
-}
-
-fn hex_n(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
-/// The registry this CLI talks to unless told otherwise.
-const DEFAULT_REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
-const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
-/// The every-block clock account. `register` reads it for the registration
-/// timestamp; the program refuses any account the LEZ clock program does not own.
-const DEFAULT_CLOCK: &str = "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU";
-
-fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-}
-
-fn client(args: &[String]) -> Option<lez_registry_sdk::Client> {
-    let reg = flag(args, "--registry")
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_REGISTRY);
-    let Some(reg) = from_hex(reg) else {
-        eprintln!("--registry takes 64 hex characters");
-        return None;
-    };
-    let endpoint = flag(args, "--endpoint")
-        .map(String::as_str)
-        .unwrap_or(DEFAULT_ENDPOINT);
-    Some(lez_registry_sdk::Client::new(endpoint, reg))
-}
-
-fn state_line(e: &core_::Entry) -> String {
-    match e.verification.state {
-        core_::VerificationState::Verified if e.verification.is_self_attested(&e.author) => {
-            "verified (by its own author)".into()
-        }
-        core_::VerificationState::Verified => "verified".into(),
-        core_::VerificationState::Mismatched => "MISMATCHED".into(),
-        core_::VerificationState::Unreproducible => "unreproducible".into(),
-        core_::VerificationState::Claimed => "claimed".into(),
-        core_::VerificationState::Unclaimed => "unclaimed".into(),
-    }
-}
-
-fn lookup_cmd(args: &[String]) -> ExitCode {
-    let Some(pid) = args.get(1).and_then(|s| from_hex(s)) else {
-        eprintln!("lookup <PROGRAM_ID_HEX>");
-        return ExitCode::FAILURE;
-    };
-    let Some(c) = client(args) else {
-        return ExitCode::FAILURE;
-    };
-    let addr = lez_registry_sdk::entry_address(c.registry(), &pid);
-    println!("derived  {}", lez_registry_sdk::base58(&addr));
-    match c.entry(&pid) {
-        Ok(Some(e)) => {
-            println!("{} {}", e.name, e.version);
-            println!("  {}", state_line(&e));
-            if let Some(cl) = &e.verification.claim {
-                println!("  source {}", cl.repository);
-                println!("  offline build {}", cl.build.network_disabled);
-            }
-            println!("  registered block {}", e.registered_at.block);
-            if let Some(m) = local::mark_for(&hex(&pid)) {
+fn lookup_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let key = key_arg(args)?;
+    let addr = sdk::key_address(c.registry(), &key);
+    println!("derived  {}", base58(&addr));
+    match c.entry_at(&addr).map_err(|e| e.to_string())? {
+        Some(e) => {
+            print_entry(&e);
+            if let Some(m) = local::mark_for(&hex(&key.program)) {
                 println!(
-                    "  locally verified by you (unix {}) — your own rebuild, not a registry claim",
+                    "  locally verified by you (unix {}): your own rebuild, not a registry claim",
                     m.marked_at
                 );
             }
-            ExitCode::SUCCESS
         }
-        // Not an error: a derived address always exists as an address. What
-        // separates a registered program from an unregistered one is whether
-        // anything was ever written there.
-        Ok(None) => {
-            println!("nothing is registered at that address");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("failed: {e}");
-            ExitCode::FAILURE
-        }
+        // Not an error: a derived address always exists as an address.
+        None => println!("nothing is registered at that address"),
     }
+    Ok(ExitCode::SUCCESS)
 }
 
-fn search_cmd(args: &[String]) -> ExitCode {
-    let needle = args.get(1).cloned().unwrap_or_default().to_lowercase();
-    let Some(c) = client(args) else {
-        return ExitCode::FAILURE;
-    };
-    let entries = match c.walk() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("failed: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+fn search_cmd(args: &[String], needle: &str) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let needle = if needle.starts_with("--") { "" } else { needle }.to_lowercase();
+    let entries = c.walk().map_err(|e| e.to_string())?;
     let hits: Vec<_> = entries
         .iter()
         .filter(|e| {
@@ -640,316 +382,316 @@ fn search_cmd(args: &[String]) -> ExitCode {
                 || e.version.to_lowercase().contains(&needle)
                 || e.description.to_lowercase().contains(&needle)
                 || e.tags.iter().any(|t| t.to_lowercase().contains(&needle))
-                || lez_registry_sdk::base58(&e.author)
-                    .to_lowercase()
-                    .contains(&needle)
-                || state_line(e).to_lowercase().contains(&needle)
+                || base58(&e.author).to_lowercase().contains(&needle)
         })
         .collect();
     println!("{} of {} entries", hits.len(), entries.len());
     for e in hits {
         println!(
-            "  {:<34} {:<10} {}",
-            e.name.chars().take(34).collect::<String>(),
-            e.version.chars().take(10).collect::<String>(),
+            "  {:<28} {:<9} {:<10} {:<44} {}",
+            e.name.chars().take(28).collect::<String>(),
+            e.version.chars().take(9).collect::<String>(),
+            match e.publisher {
+                core_::Publisher::Canonical => "deployer",
+                core_::Publisher::ThirdParty => "3rd-party",
+            },
+            base58(&e.program_id),
             state_line(e)
         );
     }
-    ExitCode::SUCCESS
+    Ok(ExitCode::SUCCESS)
 }
 
-/// An account id on the command line is hex (64 chars, optional `0x`) or the
-/// base58 a wallet and an explorer print. Try hex first, then base58.
-fn parse_account(s: &str) -> Option<[u8; 32]> {
-    from_hex(s).or_else(|| lez_registry_sdk::from_base58(s))
-}
-
-fn has_flag(args: &[String], name: &str) -> bool {
-    args.iter().any(|a| a == name)
-}
-
-/// Print an unsigned built transaction: the accounts in the order the program
-/// reads them, and the instruction words a wallet signs and submits.
-fn print_tx(tx: &BuiltTransaction) {
-    println!("built {} transaction (unsigned)", tx.instruction);
-    println!("  registry     {}", hex(&tx.registry));
+/// Sign, submit, wait for inclusion. Returns the block.
+fn submit(c: &Client, tx: &BuiltTransaction, keys: &[&Keypair], payer: &Keypair) -> Result<u64, String> {
     println!(
-        "  instruction  {} (variant index {})",
-        tx.instruction, tx.instruction_index
+        "submitting {} ({} inputs, {} signer(s) + fee payer {})",
+        tx.instruction,
+        tx.accounts.len(),
+        tx.signer_ids().len(),
+        base58(&payer.account_id())
     );
-    println!("  accounts (in the order the program destructures them):");
-    for a in &tx.accounts {
-        let mut flags: Vec<&str> = Vec::new();
-        if a.signer {
-            flags.push("signer");
-        }
-        if a.writable {
-            flags.push("writable");
-        }
-        let fl = if flags.is_empty() {
-            String::new()
-        } else {
-            format!("  [{}]", flags.join(", "))
-        };
-        println!("    {:<10} {}{}", a.role.as_str(), to_base58(&a.id), fl);
+    let s = c.submit(tx, keys, Some(payer)).map_err(|e| e.to_string())?;
+    println!("  tx {}  included in block {}", s.hash, s.block);
+    Ok(s.block)
+}
+
+fn reverted(what: &str) -> Result<ExitCode, String> {
+    println!("REVERTED: {what}");
+    println!("  the transaction was included and charged, and the chain kept nothing of it.");
+    Ok(ExitCode::FAILURE)
+}
+
+fn init_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let payer = key_from(args, "--payer")?;
+    if let Some(g) = c.global().map_err(|e| e.to_string())? {
+        println!("already initialized: {} entries", g.total_entries);
+        return Ok(ExitCode::SUCCESS);
     }
-    let words: Vec<String> = tx
-        .instruction_words
-        .iter()
-        .map(|w| format!("{w:08x}"))
-        .collect();
-    println!(
-        "  instruction data ({} u32 words):",
-        tx.instruction_words.len()
-    );
-    println!("    {}", words.join(" "));
-    println!(
-        "  instruction data (LE bytes): {}",
-        hex_n(&tx.instruction_data_bytes())
-    );
-    println!();
-    println!("  This is the program-defined half of a LEZ public transaction: the accounts");
-    println!("  above and the risc0-serde instruction words. Hand the account list, the");
-    println!("  signer(s) and these words to a wallet-backed signer to sign and submit —");
-    println!("  no `spel` and no IDL in the path. The tool stops at the signature on");
-    println!("  purpose: a key belongs where an operator sees what they are signing.");
+    submit(&c, &sdk::build_initialize(c.registry()), &[], &payer)?;
+    match c.global().map_err(|e| e.to_string())? {
+        Some(g) => {
+            println!("initialized: global {}  entries {}", base58(&sdk::global_address(c.registry())), g.total_entries);
+            Ok(ExitCode::SUCCESS)
+        }
+        None => reverted("initialize"),
+    }
 }
 
-fn register_cmd(args: &[String]) -> ExitCode {
-    let Some(program) = args.get(1).and_then(|s| from_hex(s)) else {
-        eprintln!(
-            "register <PROGRAM_ID_HEX> --name <N> --version <V> --author <ACCT> \
-             [--description <D>] [--third-party] [--clock <ACCT>] [--seq-index <N>]"
-        );
-        return ExitCode::FAILURE;
-    };
-    let (Some(name), Some(version)) = (flag(args, "--name"), flag(args, "--version")) else {
-        eprintln!("--name and --version are required");
-        return ExitCode::FAILURE;
-    };
+fn register_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let program = program_arg(args)?;
+    let key = key_from(args, "--key")?;
+    let payer = key_from(args, "--payer")?;
+    let author = key.account_id();
+    let deployer = !has(args, "--third-party");
+    let name = flag(args, "--name").ok_or("--name is required")?;
+    let version = flag(args, "--version").ok_or("--version is required")?;
     let description = flag(args, "--description").cloned().unwrap_or_default();
-    let Some(author) = flag(args, "--author").and_then(|s| parse_account(s)) else {
-        eprintln!("--author <ACCT> is required (hex or base58)");
-        return ExitCode::FAILURE;
-    };
-    let Some(clock) = parse_account(flag(args, "--clock").map_or(DEFAULT_CLOCK, String::as_str))
-    else {
-        eprintln!("--clock is not a 32-byte account id");
-        return ExitCode::FAILURE;
-    };
-    let publisher = if has_flag(args, "--third-party") {
-        core_::Publisher::ThirdParty
-    } else {
-        core_::Publisher::Canonical
-    };
-    let seq_index_flag = match flag(args, "--seq-index").map(|s| s.parse::<u64>()) {
-        Some(Ok(n)) => Some(n),
-        Some(Err(_)) => {
-            eprintln!("--seq-index must be a non-negative integer");
-            return ExitCode::FAILURE;
-        }
-        None => None,
-    };
+    let tags: Vec<String> = flags(args, "--tag").into_iter().cloned().collect();
+    let idl = flag(args, "--idl").cloned().unwrap_or_default();
+    let source = claim_from(args)?;
 
-    let Some(c) = client(args) else {
-        return ExitCode::FAILURE;
-    };
-    let registry = *c.registry();
-
-    // The directory slot is the counter's current value, and the program
-    // re-derives it and refuses a seed that is not the slot this registration
-    // lands in. Read it from the chain unless the caller pinned it for offline
-    // building.
-    let seq_index = match seq_index_flag {
-        Some(n) => n,
-        None => {
-            match c.global() {
-                Ok(g) => g.map_or(0, |g| g.total_entries),
-                Err(e) => {
-                    eprintln!("could not read the registry counters ({e}); pass --seq-index to build offline");
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-    };
-
-    let tx = match build_register(
-        &registry,
-        &RegisterRequest {
-            program: &program,
-            author: &author,
-            publisher,
-            name,
-            version,
-            description: &description,
-            clock: &clock,
-            seq_index,
-        },
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("cannot build register: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // A re-register is not silently overwritten: the program's `init` refuses an
-    // occupied address. Say so before a caller signs a transaction that cannot
-    // land. Skipped silently when offline — the build is still correct.
-    if let Ok(Some(_)) = c.account_data(&tx.entry_address()) {
+    if deployer && author != program {
         println!(
-            "warning: an entry already exists at {} — the program's `init` will reject a re-register",
-            to_base58(&tx.entry_address())
+            "refused: a deployer entry must be signed by the program's own header account.\n  \
+             --key controls {}, the program is {}.",
+            base58(&author),
+            base58(&program)
         );
+        if !has(args, "--submit-anyway") {
+            println!("  use --third-party to publish your own entry about it.");
+            return Ok(ExitCode::FAILURE);
+        }
+        println!("  --submit-anyway: sending it so the chain's refusal is on record.");
     }
-    if matches!(publisher, core_::Publisher::ThirdParty) {
-        println!("  third-party entry — keyed by the author, so it never collides with the canonical one");
+
+    let header = c
+        .program_header(&program)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("{} holds no program header: nothing is deployed there", base58(&program)))?;
+    let seq_index = c.global().map_err(|e| e.to_string())?.ok_or("the registry is not initialized")?.total_entries;
+    let at = c.clock().map_err(|e| e.to_string())?;
+    let req = sdk::RegisterRequest {
+        program: &program,
+        author: &author,
+        deployer,
+        header: header.view(),
+        seq_index,
+        at,
+        name,
+        version,
+        description: &description,
+        tags: &tags,
+        idl: &idl,
+        source,
+    };
+    let tx = sdk::build_register(c.registry(), &req).map_err(|e| e.to_string())?;
+    let entry = tx.entry_address().expect("register touches an entry");
+    println!(
+        "{} entry for {} at {}",
+        if deployer { "deployer" } else { "third-party" },
+        base58(&program),
+        base58(&entry)
+    );
+    println!("  header image {} ({})", hex(&header.image_id), if header.immutable { "immutable" } else { "mutable" });
+    println!("  directory slot {seq_index}, stamped block {} ({} ms)", at.block, at.millis);
+    submit(&c, &tx, &[&key], &payer)?;
+    match c.entry_at(&entry).map_err(|e| e.to_string())? {
+        Some(e) if e.author == author && e.program_id == program => {
+            println!("registered:");
+            print_entry(&e);
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(_) => reverted("an entry already existed at that address; it was not overwritten"),
+        None => reverted("no entry was written"),
     }
-    println!("  registration timestamp comes from the clock account, not from you");
-    println!();
-    print_tx(&tx);
-    ExitCode::SUCCESS
 }
 
-fn update_cmd(args: &[String]) -> ExitCode {
-    let Some(program) = args.get(1).and_then(|s| from_hex(s)) else {
-        eprintln!(
-            "update <PROGRAM_ID_HEX> --version <V> --author <ACCT> \
-             [--description <D>] [--idl <CONTENT_ID>] [--third-party]"
-        );
-        return ExitCode::FAILURE;
-    };
-    let Some(version) = flag(args, "--version") else {
-        eprintln!("--version is required (update rewrites it)");
-        return ExitCode::FAILURE;
-    };
+fn update_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let k = key_arg(args)?;
+    let key = key_from(args, "--key")?;
+    let payer = key_from(args, "--payer")?;
+    let version = flag(args, "--version").ok_or("--version is required")?;
     let description = flag(args, "--description").cloned().unwrap_or_default();
     let idl = flag(args, "--idl").cloned().unwrap_or_default();
-    let Some(author) = flag(args, "--author").and_then(|s| parse_account(s)) else {
-        eprintln!("--author <ACCT> is required (hex or base58)");
-        return ExitCode::FAILURE;
-    };
-    let publisher = if has_flag(args, "--third-party") {
-        core_::Publisher::ThirdParty
-    } else {
-        core_::Publisher::Canonical
-    };
-
-    let Some(c) = client(args) else {
-        return ExitCode::FAILURE;
-    };
-    let registry = *c.registry();
-
-    let tx = match build_update(
-        &registry,
-        &UpdateRequest {
-            program: &program,
-            author: &author,
-            publisher,
-            version,
-            description: &description,
-            idl: &idl,
-        },
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("cannot build update: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // update is the recorded author's alone, and the builder cannot know who
-    // that is offline. The read path can: check before a caller signs a
-    // transaction the program will refuse.
-    let live = if matches!(publisher, core_::Publisher::ThirdParty) {
-        c.third_party_entry(&program, &author)
-    } else {
-        c.entry(&program)
-    };
-    match live {
-        Ok(Some(e)) => {
-            if e.author != author {
-                println!(
-                    "warning: this entry's recorded author is {} — a transaction signed by {} will be refused (only the author may update)",
-                    to_base58(&e.author),
-                    to_base58(&author)
-                );
-            }
-            if e.frozen {
-                println!("warning: this entry is frozen — the program will refuse any update");
-            }
-        }
-        Ok(None) => {
-            println!(
-                "warning: nothing is registered at {} — there is nothing to update",
-                to_base58(&tx.entry_address())
-            );
-        }
-        // Offline or a transport error: the built transaction is still correct;
-        // the author check simply could not run.
-        Err(_) => {}
+    let before = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("nothing is registered there")?;
+    if before.author != key.account_id() {
+        println!("note: the recorded author is {}; the chain will refuse this signer", base58(&before.author));
     }
-    println!();
-    print_tx(&tx);
-    ExitCode::SUCCESS
+    let tx = sdk::build_update(c.registry(), &k, &key.account_id(), version, &description, &idl)
+        .map_err(|e| e.to_string())?;
+    submit(&c, &tx, &[&key], &payer)?;
+    let after = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("the entry vanished")?;
+    if after == before {
+        return reverted("the entry is unchanged");
+    }
+    println!("updated:");
+    print_entry(&after);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn claim_source_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let k = key_arg(args)?;
+    let key = key_from(args, "--key")?;
+    let payer = key_from(args, "--payer")?;
+    let claim = claim_from(args)?.ok_or("--repo and the build flags are required")?;
+    let tx = sdk::build_claim_source(c.registry(), &k, &key.account_id(), claim.clone())
+        .map_err(|e| e.to_string())?;
+    submit(&c, &tx, &[&key], &payer)?;
+    let after = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("nothing is registered there")?;
+    if after.verification.claim.as_ref() != Some(&claim) {
+        return reverted("the claim was not recorded");
+    }
+    println!("claimed:");
+    print_entry(&after);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn record_rebuild_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let k = key_arg(args)?;
+    let key = key_from(args, "--key")?;
+    let payer = key_from(args, "--payer")?;
+    let rebuilt = match (flag(args, "--file"), flag(args, "--image")) {
+        (Some(f), _) => image_id_of(f)?,
+        (None, Some(h)) => hex_n::<32>(h, "--image")?,
+        (None, None) => return Err("--file <BIN> or --image <HEX> is required".into()),
+    };
+    let header = c
+        .program_header(&k.program)
+        .map_err(|e| e.to_string())?
+        .ok_or("no program header at that account")?;
+    let before = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("nothing is registered there")?;
+    println!("rebuilt image  {}", hex(&rebuilt));
+    println!("header image   {}{}", hex(&header.image_id), if header.matches(&rebuilt) { "  (match)" } else { "  (DIFFERENT)" });
+    let at = c.clock().map_err(|e| e.to_string())?;
+    let tx = sdk::build_record_rebuild(c.registry(), &k, header.view(), rebuilt, at, &key.account_id());
+    submit(&c, &tx, &[&key], &payer)?;
+    let after = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("the entry vanished")?;
+    if after.verification == before.verification && after.image_id == before.image_id {
+        return reverted("no verdict was recorded");
+    }
+    println!("recorded:");
+    print_entry(&after);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn sync_header_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let k = key_arg(args)?;
+    let payer = key_from(args, "--payer")?;
+    let header = c
+        .program_header(&k.program)
+        .map_err(|e| e.to_string())?
+        .ok_or("no program header at that account")?;
+    let before = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("nothing is registered there")?;
+    if before.image_id == header.image_id && before.header_immutable == header.immutable {
+        println!("already in sync: {}", hex(&header.image_id));
+        return Ok(ExitCode::SUCCESS);
+    }
+    submit(&c, &sdk::build_sync_header(c.registry(), &k, header.view()), &[], &payer)?;
+    let after = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("the entry vanished")?;
+    if after.image_id != header.image_id {
+        return reverted("the entry still records the old header");
+    }
+    println!("synced:");
+    print_entry(&after);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn freeze_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let c = client(args)?;
+    let k = key_arg(args)?;
+    let key = key_from(args, "--key")?;
+    let payer = key_from(args, "--payer")?;
+    submit(&c, &sdk::build_freeze(c.registry(), &k, &key.account_id()), &[&key], &payer)?;
+    let after = c.entry_by_key(&k).map_err(|e| e.to_string())?.ok_or("nothing is registered there")?;
+    if !after.frozen {
+        return reverted("the entry is not frozen");
+    }
+    println!("frozen: {} {} can never change again", after.name, after.version);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Local verification: rebuild the recorded source yourself, then ask whether
+/// the ImageID you got is the one the program's header records on chain.
+fn verify_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let path = args.get(1).ok_or("verify <BIN> --program <PROGRAM>")?;
+    let program = flag(args, "--program")
+        .and_then(|s| parse_account(s))
+        .ok_or("--program <PROGRAM> is required")?;
+    let c = client(args)?;
+    let rebuilt = image_id_of(path)?;
+    let header = c
+        .program_header(&program)
+        .map_err(|e| e.to_string())?
+        .ok_or("no program header at that account")?;
+    println!("rebuilt  {}", hex(&rebuilt));
+    println!("on chain {}  ({})", hex(&header.image_id), if header.immutable { "immutable header" } else { "mutable header" });
+    if !header.matches(&rebuilt) {
+        println!("MISMATCH: your rebuild is not the program running at {}", base58(&program));
+        return Ok(ExitCode::FAILURE);
+    }
+    println!("match: your rebuild is the program running at {}", base58(&program));
+    println!("  necessary, not sufficient: a build that fetched the answer over the network");
+    println!("  would match too. Rebuild with the network disabled (scripts/build-sealed.sh).");
+    if has(args, "--mark") {
+        use sha2::Digest as _;
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let mark = local::Mark {
+            program_id: hex(&program),
+            digest: hex(&rebuilt),
+            file_sha256: hex(&sha2::Sha256::digest(&bytes)),
+            marked_at: local::now(),
+        };
+        let at = local::add(&mark).map_err(|e| format!("the match stands, but the mark was not written: {e}"))?;
+        println!("  marked locally verified, for you only, in {}", at.display());
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn local_verified_cmd() -> ExitCode {
     let marks = local::load();
     println!("{}", local::store_path().display());
     if marks.is_empty() {
-        println!("  nothing marked yet — `verify <FILE> --expect <ID> --mark` after a rebuild");
+        println!("  nothing marked yet: `verify <BIN> --program <PROGRAM> --mark` after a rebuild");
     }
     for m in marks {
-        println!(
-            "  {}  rebuilt file sha256 {}  unix {}",
-            m.program_id, m.file_sha256, m.marked_at
-        );
+        println!("  {}  image {}  unix {}", m.program_id, m.digest, m.marked_at);
     }
     ExitCode::SUCCESS
 }
 
-fn program_header_cmd(args: &[String]) -> ExitCode {
-    let Some(pid) = args
-        .get(1)
-        .and_then(|s| from_hex(s).or_else(|| lez_registry_sdk::from_base58(s)))
-    else {
-        eprintln!("program-header <PROGRAM_ACCOUNT> — hex or base58");
+/// Check a content identifier, and resolve it from a directory when asked.
+fn idl_cmd(args: &[String]) -> ExitCode {
+    let Some(raw) = args.get(1) else {
+        eprintln!("idl <CONTENT_ID> [--from <DIR>]");
         return ExitCode::FAILURE;
     };
-    let Some(c) = client(args) else {
+    let Some(id) = core_::decode_content_id(raw.trim()) else {
+        eprintln!(
+            "not a multibase base58btc content identifier: a Logos Storage identifier starts with `z` and decodes to {} bytes",
+            core_::CONTENT_ID_LEN
+        );
         return ExitCode::FAILURE;
     };
-    match c.program_header(&pid) {
-        Ok(Some(h)) => {
-            println!("image id  {}", hex(&h.image_id));
-            println!(
-                "header    {}",
-                if h.immutable {
-                    "immutable — can never be repointed, so a match cannot go stale"
-                } else {
-                    "mutable — the deployer may repoint it; re-check after any update"
-                }
-            );
-            match flag(args, "--image").and_then(|s| from_hex(s)) {
-                Some(img) if h.matches(&img) => {
-                    println!("match     your rebuild is the program running at this account");
-                    ExitCode::SUCCESS
-                }
-                Some(_) => {
-                    println!("MISMATCH  your rebuild is not the program running at this account");
-                    ExitCode::FAILURE
-                }
-                None => ExitCode::SUCCESS,
-            }
-        }
-        Ok(None) => {
-            println!("no program header at that account");
-            ExitCode::FAILURE
-        }
-        Err(e) => {
-            eprintln!("failed: {e}");
-            ExitCode::FAILURE
-        }
+    println!("content id   {}", raw.trim());
+    println!("  bytes      {}", hex(&id));
+    let Some(from) = flag(args, "--from") else {
+        println!("  well formed; nothing fetched (pass --from <DIR> to resolve offline)");
+        return ExitCode::SUCCESS;
+    };
+    match std::fs::read(std::path::Path::new(from).join(raw.trim())) {
+        Ok(body) => match serde_json::from_slice::<serde_json::Value>(&body) {
+            Ok(_) => println!("  resolved, {} bytes, parses as JSON", body.len()),
+            Err(_) => println!("  resolved, {} bytes, but it does NOT parse: treat the IDL as unavailable", body.len()),
+        },
+        // Unresolvable is a normal outcome: the on-chain metadata still stands.
+        Err(e) => println!("  IDL unavailable ({e}); the entry's on-chain metadata is unaffected"),
     }
+    ExitCode::SUCCESS
 }

@@ -1,9 +1,9 @@
 [package]
 name    = "lez-registry-cli"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Derive registry addresses, verify a deployed program against its source, and print what the registry holds."
+description = "Register, update, look up, search and verify programs in the Provenance registry on LEZ v0.3."
 
 [[bin]]
 name = "lez-registry"
@@ -11,9 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 lez-registry-core = { path = ".." }
-sha2 = "0.10"
-lez-registry-sdk = { path = "../sdk" }
-borsh = { version = "1", features = ["derive"] }
+lez-registry-sdk  = { path = "../sdk" }
+sha2        = "0.10"
+serde_json  = "1"
+# Computes a built guest's ImageID the way the loader does. The version is the
+# one LEZ v0.3.0 locks.
+risc0-binfmt = "=3.0.4"
 
 [profile.release]
 overflow-checks = true

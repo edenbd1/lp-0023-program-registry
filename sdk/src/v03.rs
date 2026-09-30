@@ -1,6 +1,6 @@
 //! Reading a program on LEZ 0.3, where a program is an account.
 //!
-//! On 0.3 (v0.3.0-rc1) a deployed program lives at a *header account* the
+//! On LEZ v0.3 a deployed program lives at a *header account* the
 //! deployer chose and signed for. The header sits in that account's
 //! `program_loader` shard and records the `image_id` the runtime recomputed from
 //! the bytecode segments — never a caller-supplied value — plus whether the
@@ -12,7 +12,7 @@
 //! The loader's account id is `[0xFE; 32]`
 //! (`lee/state_machine/core/src/program/mod.rs`, `PROGRAM_LOADER_ACCOUNT_ID`).
 
-use crate::{base58, Client, Error, Result};
+use crate::{base58, Client, Error, HeaderView, Result};
 use lez_registry_core::AccountId;
 
 /// `PROGRAM_LOADER_ACCOUNT_ID` on LEZ 0.3.
@@ -50,6 +50,15 @@ impl ProgramHeader {
     /// Whether a rebuilt ImageID is the one running at this program id.
     pub fn matches(&self, rebuilt_image_id: &[u8; 32]) -> bool {
         &self.image_id == rebuilt_image_id
+    }
+
+    /// The part of the header the registry records and checks on chain.
+    #[must_use]
+    pub const fn view(&self) -> HeaderView {
+        HeaderView {
+            image_id: self.image_id,
+            immutable: self.immutable,
+        }
     }
 }
 

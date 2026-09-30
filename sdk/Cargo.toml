@@ -3,7 +3,7 @@ name = "lez-registry-sdk"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Resolve and read LEZ program registry entries without an index."
+description = "Resolve, register and verify programs in the Provenance registry on LEZ v0.3, without an index."
 
 [dependencies]
 lez-registry-core = { path = ".." }
@@ -11,6 +11,8 @@ borsh = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 ureq = "2"
 serde_json = "1"
+k256 = { version = "0.13", default-features = false, features = ["schnorr", "std"] }
+getrandom = "0.2"
 
 [profile.release]
 overflow-checks = true
