@@ -38,6 +38,14 @@ cp "$ARTIFACT" artifacts/programs/lez_registry.bin
 $REG_CLI image-id artifacts/programs/lez_registry.bin   # same hex; also prints the segment count
 ```
 
+The committed `artifacts/programs/lez_registry.bin` is that build: the ELF
+from the `r0.1.91.1` builder with the network disabled, wrapped with the
+v1compat kernel exactly as `cargo risczero build` does after its Docker step
+(on this machine that last step hung after the ELF was exported, so the wrap
+was done separately). ImageID
+`dd12f4a8e3c7218d85cdf6c0625014b352e65be3ff447b911766476671cd6266`, sha256
+`65cf1994920c399764af4238958f221ce2093c895d56120ee297d0922cf986dd`.
+
 ## 1. Wallet and keys
 
 ```bash
