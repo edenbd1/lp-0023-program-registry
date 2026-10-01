@@ -92,7 +92,7 @@ headroom because the base fee moves with load.
 ```bash
 N=$($REG_CLI image-id artifacts/programs/lez_registry.bin 2>&1 >/dev/null \
       | sed -n 's/.*: \([0-9]*\) loader segment.*/\1/p')
-SEGS=(); for _ in $(seq 1 "$N"); do SEGS+=("Public/$($REG_CLI keygen | head -1)"); done
+SEGS=(); for _ in $(seq 1 "$N"); do SEGS+=("Public/$($REG_CLI keygen | sed -n 1p)"); done
 $WALLET program-loader deploy --elf artifacts/programs/lez_registry.bin \
   --header "Public/$REG" --segments "${SEGS[@]}" --payer "Public/$PAYER"
 

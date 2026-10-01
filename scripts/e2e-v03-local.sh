@@ -156,7 +156,7 @@ echo "stranger   $STRANGER"
 deploy() { # deploy <bin> <header> [--immutable]
   local bin=$1 header=$2 n segs=()
   n=$(reg image-id "$bin" 2>&1 >/dev/null | sed -n 's/.*: \([0-9]*\) loader segment.*/\1/p')
-  for _ in $(seq 1 "$n"); do segs+=("Public/$(reg keygen | head -1)"); done
+  for _ in $(seq 1 "$n"); do segs+=("Public/$(reg keygen | sed -n 1p)"); done
   wallet program-loader deploy --elf "$bin" --header "Public/$header" --segments "${segs[@]}" \
     --payer "Public/$PAYER" ${3:+"$3"} | grep -e 'deployed' -e 'rror' || true
 }
@@ -227,7 +227,7 @@ echo "-- a stranger tries to publish the DEPLOYER entry for a program they did n
 reg register "$TOKEN" --name example-token --version 0.3.0 \
   --key "$K/stranger.key" --payer "$K/payer.key" --submit-anyway && die "an unauthorised deployer entry was accepted"
 grep -o 'E9010[^"]*' "$WORK/sequencer.log" | tail -1 | sed 's/^/sequencer: /' || true
-reg lookup "$TOKEN" | head -2
+reg lookup "$TOKEN" | sed -n 1,2p
 
 echo "-- the deployer, signing with the program's header key"
 LEZ_COMMIT=$(git -C "$LEZ_SRC" rev-parse HEAD 2>/dev/null || echo db66590ab821a4e142c211017a3866d007f6fa77)
@@ -274,7 +274,7 @@ reg register "$PING" --name example-ping --version 1.0.0 --tag demo \
 reg record-rebuild "$PING" --file "$PING_BIN" --key "$K/attester.key" --payer "$K/payer.key"
 NEW_BIN="$LEZ_SRC/artifacts/lez/programs/ping_receiver.bin"
 n=$(reg image-id "$NEW_BIN" 2>&1 >/dev/null | sed -n 's/.*: \([0-9]*\) loader segment.*/\1/p')
-segs=(); for _ in $(seq 1 "$n"); do segs+=("Public/$(reg keygen | head -1)"); done
+segs=(); for _ in $(seq 1 "$n"); do segs+=("Public/$(reg keygen | sed -n 1p)"); done
 echo "-- the deployer repoints the header at different bytecode (wallet program-loader update)"
 wallet program-loader update --elf "$NEW_BIN" --header "Public/$PING" --segments "${segs[@]}" \
   --payer "Public/$PAYER" | grep -e 'rror' -e 'pdated' || true
@@ -312,5 +312,5 @@ echo "-- every refusal the sequencer recorded in this run"
 grep -o 'E90[0-9][0-9] [^"]*' "$WORK/sequencer.log" | sort -u || true
 
 step "done"
-echo "registry $REG on $LEZ_RPC: $(reg list | head -1)"
+echo "registry $REG on $LEZ_RPC: $(reg list | sed -n 1p)"
 ok "every step above was read back from the chain"
