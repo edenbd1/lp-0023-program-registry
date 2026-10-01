@@ -44,7 +44,9 @@ mv "$STANZA" "$CONFIG"
 
 echo "[2/2] building with --network none ..."
 
-OUT=$(PATH="$PWD/scripts/sealed:$PATH" cargo risczero build --manifest-path program/Cargo.toml 2>&1)
+# The builder tag LEZ v0.3.0 builds its own programs with (its Justfile).
+OUT=$(PATH="$PWD/scripts/sealed:$PATH" RISC0_DOCKER_CONTAINER_TAG="${RISC0_DOCKER_CONTAINER_TAG:-r0.1.91.1}" \
+  cargo risczero build --manifest-path program/Cargo.toml 2>&1)
 echo "$OUT" | tail -2
 
 IMAGE_ID=$(printf '%s' "$OUT" | grep -o 'ImageID: [0-9a-f]\{64\}' | tail -1 | cut -d' ' -f2) || true

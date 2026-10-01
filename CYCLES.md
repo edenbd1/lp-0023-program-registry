@@ -1,71 +1,52 @@
-# zkVM cycle cost
+# Cycle cost on LEZ v0.3
 
-Measured with the RISC0 3.0.5 executor (no proving), guest built in release with
-`overflow-checks = true` — the same semantics an on-chain program ships with.
-Reproduce with `cd zkvm && cargo run --release`. **This file is regenerated from
-that command's output**, so a figure here and a figure on your screen cannot
-drift apart.
+On LEZ v0.3 a public call runs the guest once to **plan** and once more to
+**apply** each effect the plan emitted, and the transaction is charged the sum
+of those RISC0 cycles as execution gas (`fee_actual_base`,
+`lez/programs/fee/core/src/assess.rs`). The per-transaction ceiling is
+`max_gas_exec` = **10,000,000** (`getFeeState` on a v0.3.0 sequencer).
 
-Counts are `env::cycle_count()` deltas taken inside the guest, with the
-90-cycle cost of the measurement itself subtracted from every row.
-`core::hint::black_box` stops the optimiser hoisting a pure function out of the
-timed region.
+The figures below are those sums, measured by running the real guest binary
+through exactly that plan-then-apply sequence under the RISC0 3.0.5 executor
+(the one the sequencer uses when it does not prove), with instructions and
+shard selectors built by the SDK and shard contents carried from one
+instruction to the next:
 
-The number that matters is LEZ's **32,000,000-cycle cap on public execution**.
+```bash
+cd tools/cycles-v03 && cargo run --release -- <lez_registry.bin>
+```
 
-## Per operation
+Guest: ImageID `0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d`
+(the build the local end-to-end run deployed, `evidence/e2e-v03-local.txt`).
 
-| op | cases | median | min | max |
-|---|---:|---:|---:|---:|
-| `entry_seed` | 8 | 4718 | 4718 | 4718 |
-| `third_party_entry_seed` | 8 | 9215 | 9215 | 9215 |
-| `seq_seed` | 8 | 4720 | 4720 | 4720 |
-| `global_seed` | 1 | 110 | 110 | 110 |
-| `Verification::claim` | 8 | 451 | 447 | 451 |
-| `record_rebuild (accepts)` | 8 | 625 | 625 | 625 |
-| `record_rebuild (refuses)` | 8 | 625 | 625 | 625 |
-| `Entry::validate` | 8 | 35 | 35 | 35 |
-| `Entry serialise` | 8 | 861 | 861 | 861 |
-| `Entry deserialise` | 8 | 3873 | 3873 | 3873 |
-| `deployment_digest 4KiB` | 4 | 261637 | 261636 | 261637 |
-| `deployment_digest 64KiB` | 4 | 4105477 | 4105476 | 4105477 |
+| instruction | plan | applies | total cycles (execution gas) | share of the 10M ceiling |
+|---|---:|---|---:|---:|
+| `initialize` | 10,164 | 6,897 | 17,061 | 0.17% |
+| `register` (deployer, with source claim) | 63,014 | 8,833 + 7,078 + 7,811 + 18,667 | **105,403** | 1.05% |
+| `update` (version, description, IDL) | 33,806 | 21,805 | **55,611** | 0.56% |
+| `claim_source` | 21,802 | 22,939 | 44,741 | 0.45% |
+| `record_rebuild` (match, offline: Verified) | 22,889 | 8,833 + 21,425 | 53,147 | 0.53% |
+| `sync_header` (unchanged) | 20,469 | 8,833 + 20,703 | 50,005 | 0.50% |
+| `freeze` | 17,760 | 20,836 | 38,596 | 0.39% |
 
-## Per instruction body
+The `register` applies are, in order: the read-only check of the program's
+header in the loader shard (8,833), the global counter (7,078), the directory
+slot (7,811), and the entry itself (18,667). The same 8,833-cycle header check
+is what `record_rebuild` and `sync_header` pay to compare against the chain.
 
-Each measured whole rather than summed from the rows above, because a sum omits
-the decode of what is already stored — and for `update` that decode is most of
-the cost.
+The entry this sequence ends with is 500 bytes in the registry's shard.
 
-| instruction body | cycles | share of the cap |
-|---|---:|---:|
-| `register` | 6399 | 0.0200% |
-| `update` | 5215 | 0.0163% |
-| `claim_source` | 6166 | 0.0193% |
-| `claim_canonical` | 6627 | 0.0207% |
+## What the numbers say
 
-`update` is the cheapest of the four despite doing a decode, an edit, a
-validation and a re-encode: it derives no addresses. `register` and
-`claim_canonical` each pay for a seed derivation, which at ~4,700 cycles is the
-single most expensive thing any of them does.
-
-Nothing here is within three orders of magnitude of the cap.
-
-## The one row that decides a design question
-
-`deployment_digest` is the only operation whose cost scales with its input, at
-**62.6 cycles per byte**. Projected onto this registry's own artifact
-(486,112 bytes) that is **≈30,452,295 cycles, 95% of the entire 32M
-budget** — for the hash alone, before one line of program logic runs.
-
-So the chain cannot check an artifact against its digest on chain. Not "should
-not": cannot afford to. That is a second and independent reason for keeping
-verification off chain, the first being that a chain has no compiler.
-
-Off chain the same digest costs microseconds and the answer is identical, which
-is why it lives in the CLI and the SDK.
-
-## What this rules out
-
-Anything that would make a registry operation scale with the number of entries.
-`entry_seed` is a single SHA-256 over 53 bytes and costs the same whether the
-registry holds four programs or four million.
+- Every instruction is about 1% of the ceiling or less, so the CLI's default gas
+  limit of 1,000,000 leaves roughly a tenfold margin and keeps the fee reserve
+  small. `PROVENANCE_GAS_LIMIT` overrides it.
+- `plan` dominates `register` because it builds and validates the whole entry
+  (and derives three PDAs) before any shard is touched; the applies only check
+  and write.
+- Nothing scales with the number of entries: resolving, registering and
+  updating cost the same whether the registry holds four programs or four
+  million.
+- Hashing an artifact on chain is still out of the question. Verifying a
+  rebuild needs no hash at all on v0.3: the loader already recorded the ImageID
+  in the header, and the registry compares 32 bytes against it.

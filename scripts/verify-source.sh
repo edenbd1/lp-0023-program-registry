@@ -7,7 +7,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BIN=artifacts/programs/lez_registry.bin
-BUILDER_IMAGE=risczero/risc0-guest-builder:r0.1.88.0
+BUILDER_IMAGE=risczero/risc0-guest-builder:r0.1.91.1
 
 fail=0
 say() { printf '%-22s %s\n' "$1" "$2"; }
@@ -43,9 +43,10 @@ say "builder digest" "${IMG:-unavailable offline — the tag above is the pin}"
 if [ "${1:-}" = "--rebuild" ]; then
   echo
   echo "rebuilding (this takes a few minutes) ..."
-  OUT=$(cargo risczero build --manifest-path program/Cargo.toml 2>&1 | tail -1)
+  OUT=$(RISC0_DOCKER_CONTAINER_TAG=r0.1.91.1 cargo risczero build --manifest-path program/Cargo.toml 2>&1 | grep 'ImageID' | tail -1)
   REBUILT=$(printf '%s' "$OUT" | grep -o '[0-9a-f]\{64\}' | head -1)
-  DEPLOYED=$(spel program-id "$BIN" 2>/dev/null | grep -o '[0-9a-f]\{64\}' | head -1)
+  cargo build --release -q --manifest-path cli/Cargo.toml
+  DEPLOYED=$(cli/target/release/lez-registry image-id "$BIN" 2>/dev/null | head -1)
   say "rebuilt ImageID" "${REBUILT:-<build failed>}"
   say "deployed ImageID" "${DEPLOYED:-<no artifact>}"
   if [ -n "$REBUILT" ] && [ "$REBUILT" = "$DEPLOYED" ]; then
@@ -71,17 +72,20 @@ nothing about the source. So a tool that guessed "probably offline" would be
 committing the exact error the registry exists to catch.
 
 What this build DOES establish:
-  - determinism. Two independent runs of the same source produced the same
-    ImageID, aa13f602f77efbcb1760ce33cb61caa15fa37a2e566e39fe5ada2cd73f8f1a60.
+  - determinism. Two independent runs of the same source produce the same
+    ImageID.
   - a pinned builder. The guest is built inside one pinned image, not against
     whatever toolchain the operator happens to have.
   - the artifact identity. The rebuilt ImageID either equals the deployed one or
     it does not, and this script says which.
 
-What closes it: `cargo risczero build --network=none`, or a guest Dockerfile
-using `RUN --network=none` over vendored dependencies. Until one exists, a claim
-recorded from this build is honestly flagged network_disabled=0, and the on-chain
-program refuses to call it Verified. That refusal is demonstrated in
-DEPLOYMENTS.md against the live testnet.
+What closes it: scripts/build-sealed.sh, which vendors every dependency first
+and then forces the build container off the network. Only a binary from that
+script may be claimed network_disabled=1; a claim recorded from this one is
+flagged network_disabled=0, and the on-chain program records the rebuild as
+Unreproducible rather than Verified (shown in evidence/e2e-v03-local.txt).
+
+On LEZ v0.3 the deployed ImageID is read from the program's header account:
+  lez-registry program-header <PROGRAM> --rpc <URL>
 EOF
 exit $fail

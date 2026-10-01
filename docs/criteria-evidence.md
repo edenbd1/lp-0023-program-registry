@@ -1,202 +1,61 @@
-# LP-0023 criteria, and where this submission actually stands
+# LP-0023 criteria, and where the v0.3 port stands
 
-The prize text is [`prizes/LP-0023.md`](https://github.com/logos-co/lambda-prize/blob/master/prizes/LP-0023.md)
-on `logos-co/lambda-prize`, **merged and open since 2026-09-21** (PR #157), with a
-**$2,000** prize to the first submission that meets every criterion. The rows
-below were written against the August draft (PR #127); where the final text
-differs, the difference is noted in the row or in the section after the tables.
-
-**The final text targets testnet 0.3 throughout**, and the 0.3 program model is
-new — see [lez-0.3-migration.md](lez-0.3-migration.md). Every *met* below was
-met against the v0.2.4 zone and will be re-established on 0.3.
-
-Status is one of **met**, **partial**, or **open**. Nothing is marked met that
-has not been run; where a criterion is partial, what is missing is named rather
-than described as nearly done.
+Against `prizes/LP-0023.md` on `logos-co/lambda-prize` (open, $2,000, first
+submission to meet every criterion). Status is **met**, **partial** or
+**open**; nothing is marked met that has not been run. "Local" means against a
+real LEZ v0.3.0 standalone sequencer (`evidence/e2e-v03-local.txt`); the public
+testnet v0.3 deployment is **pending funding** ([deploy-v03.md](deploy-v03.md)).
 
 ## Functionality
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 1 | On-chain registry program in SPEL with a published IDL | **met** | `program/`, `idl/lez_registry.idl.json`, deployed — see [DEPLOYMENTS.md](../DEPLOYMENTS.md) |
-| 2 | Register with name, version, author, description, tags, IDL pointer, **registration timestamp**; per-program PDA derivable without an indexer | **met** | `register`; the timestamp is read from the sequencer's clock account, not supplied by the caller — see below |
-| 3 | Canonical vs third-party entries, distinguishable on chain; unauthorised canonical attempt rejected in the demo | **partial** (met on v0.2.4; the final text's deployer signature needs 0.3) | `claim_canonical` makes the canonical slot takeable by whoever reproduces the deployed bytecode offline, since LEZ has no deploy authority to bind it to. Demonstrated live at block 17862: a squatter registered and claimed, a wrong rebuild was refused and moved nothing, the right rebuild took the entry. The limits are written down in [design-positions.md](design-positions.md) rather than glossed |
-| 4 | Only the registering author may update | **met** | `require_writable_by`, test `only_the_author_may_write_and_freezing_is_one_way` |
-| 5 | Singleton global state with total registered | **met** | `GlobalAccount { total_entries, total_verified }` |
-| 6 | IDL JSON on Logos Storage, uploaded by tooling in one step, resolvable and parse-checked by clients | **met** | `tools/storage-upload.sh` runs a real Logos Storage node in-process and returns a real CID; the registry's own IDL is stored at `zDvZRwzmA4EqenwX34C9oqpDpp4jP5SM8k7y5kE7DccFe7xVDHNG` and that identifier is recorded on chain and reads back identical. `lez-registry idl` decodes it and parse-checks the resolved object |
-| 7 | Discovery: by program ID without an indexer, **full enumeration**, search by name/author/tag | **met** | derivation in `sdk/`; enumeration via the sequence directory; search in `indexer/`, which is part of this submission and runs against a stock sequencer |
-| 8 | Reproducible builds — pinned toolchain, deterministic, byte-identical for a third party | **met** | `scripts/build-sealed.sh`; repeated runs reproduce the same ImageID, and a rebuild from HEAD reproduced the deployed one |
-| 9 | Source verification reporting **four distinct states** | **met** | `Verified`, `Mismatched`, `Unclaimed`, `Claimed` — plus a fifth, `Unreproducible`, for a rebuild whose claimed build had network access |
-| 10 | A hash match alone is not proof; state how the build-script attack is addressed | **met** | sealed builds plus a named attester; [README](../README.md) |
-| 11 | Version-bound verification; document the staleness window; expose the last-verified point | **met** | `last_checked` is stored and displayed; the staleness argument is in [design-positions.md](design-positions.md) |
-| 12 | Operates end-to-end against Logos testnet 0.3 | **partial** | the registry is deployed and operates end-to-end against the current public zone `https://testnet.lez.logos.co` (`scripts/demo.sh`, `scripts/e2e-local-sequencer.sh`; live global resolves now). **But that zone runs LEZ v0.2.x (v0.2.4), and the Logos roadmap lists *testnet 0.2* and *testnet 0.3* as distinct milestones — so the current network is most likely testnet 0.2, not 0.3.** Nothing in the LEZ source labels a testnet "0.3", and the endpoint exposes no version RPC. Whether "testnet 0.3" is this same endpoint under a deployment label, a not-yet-live future network, or a different zone is **unconfirmed and needs the prize author / Logos to clarify** — this is a potential hard blocker, not a wording gap |
+| criterion | status | evidence |
+|---|---|---|
+| On-chain registry built with SPEL, with a published IDL; only metadata and pointers on chain | **partial** | `program/` on `lee_core` v0.3.0, `idl/lez_registry.idl.json` in SPEL's format with a drift test. Not built with SPEL, because SPEL has no v0.3 release (README, "Why the IDL is hand-maintained") |
+| Register with name, version, author, description, IDL pointer, code pointer, registration timestamp; lookup without a centralised indexer | **met (local)** | `register` takes all of them in one transaction; the timestamp is bounded on chain by validity windows; lookup is one PDA derivation and one read |
+| Deployer vs third-party entries; deployer entry signed by the deploying account; clients tell them apart without an off-chain service; unauthorised deployer attempt rejected in the demo | **met (local)** | the deployer entry must be signed by the program's header account (the loader's deploy authority); `publisher` is on chain; the transcript shows a stranger's deployer entry reverted with `E9010` |
+| Only the original author may update (version, IDL pointer, description) | **met (local)** | `require_writable_by`; transcript shows a stranger's update reverted with `E9003` |
+| IDL stored on Logos Storage | **partial** | the entry stores a Logos Storage content id and `tools/storage-upload.sh` uploads; the local run uses a previously uploaded id, it does not upload |
+| Discovery: by program id, full enumeration, search by name and author | **met (local)** | `lookup`, `list` (sequence directory walk), `search`; `indexer/` optional |
+| Source verification: pointer, commit, build config; local rebuild marks "locally verified" | **met (local)** | `claim_source` / `register --repo …`; `verify --mark` compares a rebuild's ImageID with the header on chain; transcript rebuilds with the network denied and records `Verified` |
+| Testnet 0.3 end to end | **open** | pending funding; the identical sequence runs locally |
 
 ## Usability
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 13 | SDK for third parties: register, resolve, search | **met** | `sdk/` resolves, enumerates, **and builds register/update transactions in process** — `build_register` (canonical and third-party) and `build_update` (author-gated) in `sdk/src/tx.rs`. The account plan is the order the program destructures and the instruction words are risc0-serde, pinned against risc0's own published vectors *and* proven byte-for-byte identical to `spel` in `sdk/tests/spel_parity.rs`; the derivations are cross-checked against the live chain in `sdk/tests/e2e.rs`. Signing/submission is a wallet's, deliberately — the SDK hands a signer the exact `Message::new_preserialized` inputs and holds no key |
-| 14 | CLI covering register, update, lookup, search, verification | **met** | `register` and `update` now build the transaction **in process via the SDK — no `spel` in the construction path**; the entry address is re-derived, the on-chain author is checked before an update, and an occupied address is flagged before a re-register. `lookup`, `search`, `entry-address`, `deployment-digest`, `verify`, `explain-entry` and `idl` run against the live chain. The tool stops at the signature: it prints the exact accounts and instruction words for a wallet-backed signer, because a key belongs where an operator sees what they are signing (the same position as criterion 15). Live submission itself is not wired into the CLI |
-| 15 | Basecamp GUI: browse, search, full metadata, resolved IDL, verification status, register | **partial** | browsing, filtering, full metadata and the IDL identifier are all in `app/`; the four states and the canonical/third-party distinction are visible in the list, not only the detail. **Registering is not there** and is a position rather than a gap: registering is a signed claim and belongs where an operator sees what they are signing |
-| 16 | Module published to a catalog fork of `logos-modules-release-base`, `logos-repo.json` URL in the submission | **partial** | [`edenbd1/logos-modules-antumbra`](https://github.com/edenbd1/logos-modules-antumbra) — forked from the template, both modules as submodules with generated release workflows, `logos-repo.json` pointing at the fork's index. **Private, so nothing is installable yet**: catalog and both submodules go public together before submission and the release workflow runs once |
-| 17 | All four states visually distinct; canonical vs third-party distinct; the signer behind a claim surfaced, not a bare badge | **met** | each state has its own colour and its own sentence, self-attested renders differently from independently verified, the attester account is shown, and the publisher is a field. The list carries the verdict too, so scanning names shows what backs each claim |
-| 18 | "Verified does not mean safe" stated wherever status is shown | **met** | in the panel, in `explain-entry --explain`, and in the README |
-| 19 | UX polish, judged as a normal user | **partial** | one screen, coherent, but thin until browse and search land |
+| criterion | status | evidence |
+|---|---|---|
+| Module/SDK to register, resolve and search | **met (local)** | `sdk/`: resolve, walk, build, BIP-340 sign, submit; exercised by the CLI and `sdk/tests/e2e.rs` against the local chain |
+| CLI covering register, update, lookup, search, verification | **met (local)** | `cli/` |
 
 ## Reliability
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 20 | Non-author cannot update; no silent overwrite on re-register | **met** | `init` refuses an existing account and the program checks besides |
-| 21 | Graceful degradation when an IDL is unresolvable or unparseable | **met** | three outcomes exercised — resolves and parses, resolves and does not parse, does not resolve — and all three report the IDL as unavailable while leaving the on-chain metadata untouched |
-| 22 | No mandatory external services | **met** | sequencer only; the indexer is optional and self-hosted |
-| 23 | Source verification runs locally, no hosted build service | **met** | `scripts/build-sealed.sh` runs on the operator's Docker |
+| criterion | status | evidence |
+|---|---|---|
+| Graceful degradation on an unresolvable or unparseable IDL | **met** | `lez-registry idl`, the explorer and the Basecamp module show the entry with the IDL marked unavailable |
+| No mandatory centralised services | **met** | sequencer only; indexer and explorer optional and self-hostable |
 
 ## Performance
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 24 | Document **cycle count** for register and update (LEZ `cycle_bench` terminology, not a compute-unit or gas analogy) | **met** | [CYCLES.md](../CYCLES.md) reports RISC0 executor cycle counts — the same executor-cycle measure LEZ's own `cycle_bench` uses — for all four instruction bodies whole: register 6,399, update 5,215, claim_source 6,166, claim_canonical 6,627 cycles, none above 0.021% of the 32M-cycle public-execution cap |
-| 25 | Lookup latency, and search across a registry of **at least 500 entries** | **met** | [`scripts/populate-and-measure-500.sh`](../scripts/populate-and-measure-500.sh) registers **500 distinct entries** on a local standalone `sequencer_service` (`RISC0_DEV_MODE=0`, the criterion-33 harness) and measures over all 500 through the SDK `Client` the explorer uses. The count is read straight off the global account first (`total_entries: 500`). Lookup stays one hash + one read and is size-independent at scale — hit p50 222µs vs miss p50 212µs, a 10µs gap with 500 entries on chain; a full `walk` enumeration of all 500 is ~240 ms mean (1001 sequential reads); search is that walk plus a ~40µs in-memory filter (500 / 1 / 100 hits for three needles). Local because standing up 500 *entries* on the public testnet is ~a day of block time, whereas the earlier public run measured 500 *lookups* — both are in [LATENCY.md](../LATENCY.md), and the walk's per-read cost is why it lives in the cached indexer, not the resolve path |
+| criterion | status | evidence |
+|---|---|---|
+| Cycle counts for register and update | **met** | [CYCLES.md](../CYCLES.md): register 105,403, update 55,611 cycles (plan plus applies), `tools/cycles-v03` |
 
 ## Supportability
 
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 26 | Deployed and tested on testnet 0.3, program ID in the README | **partial** | deployed and tested end to end against `testnet.lez.logos.co` (LEZ v0.2.x); the program ID, deploy transaction, global-state account and endpoint are in the README table. Blocked on the same unresolved question as #12: whether that endpoint is what the prize means by "testnet 0.3" (roadmap-distinct from testnet 0.2) is unconfirmed |
-| 27 | Builds and runs end-to-end on macOS (Apple Silicon) **and** Linux (x86_64), demo unmodified from a clean clone | **met** | `scripts/demo.sh` runs unmodified end to end on both: on macOS (Apple Silicon) natively, and on Linux x86_64 in a `--platform linux/amd64 rust:1-slim` container from a clean copy — build `cli`+`sdk`, then `demo.sh`, which walks the live registry, decodes the entry, checks the counters and re-verifies every claim in `DEPLOYMENTS.md` (`all checks passed`, exit 0) on both. The CI `demo` job re-runs it on an `ubuntu-latest`/`macos-latest` matrix once Actions is unblocked; this is the same run done locally in the meantime |
-| 28 | Basecamp module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/CMakeLists.txt` takes that path when `LOGOS_MODULE_BUILDER_ROOT` is set; the shipped `.lgx` was packaged with `lgx` from `logos-package` |
-| 29 | IDL generated via SPEL; **the registry registered in itself** | **met** | `idl/`, and entry 0 is the registry |
-| 30 | End-to-end integration tests against a real sequencer, in CI, green on default branch | **met** | `sdk/tests/e2e.rs` reads the live registry and asserts on what comes back: the registry is registered in itself, the derivation still agrees with the runtime, the counters match what the walk finds, all four verification states are present on chain, and an unregistered program resolves to nothing rather than erroring. Run as a required CI job, not skipped |
-| 31 | README documents setup, the deployed program ID, and step-by-step usage via CLI and Basecamp app | **met** | the deployed id, deploy transaction, global-state account and endpoint are in a table at the top; runnable CLI commands for resolve, derive, browse and digest; the signed path through `spel` and `populate-demo.sh`; the Basecamp build with the Qt 6.9.2 ceiling stated |
-| 32 | SDK documentation with a worked resolve example | **met** | `sdk/examples/resolve.rs` — the path a wallet or explorer takes, in about twenty lines: derive the address, read the entry, and branch on the verification state including the self-attested case. Runs against the live chain |
-| 33 | Reproducible end-to-end demo against a **local** sequencer with `RISC0_DEV_MODE=0` | **met** | `scripts/e2e-local-sequencer.sh`: one command from a clean clone stands up a real `sequencer_service` in standalone mode on a throwaway local port, funds the genesis signer, **deploys this registry's own sealed guest to that local chain**, initialises it, **registers the canonical entry** — built in process by the CLI (deriving the same `wkLxSjs…` address the public testnet holds), then signed and submitted through the wallet-backed `spel` — and reads it back, asserting the deployed program's ImageID, the deploy digest as a local transaction, the entry contents, `total_entries`, and two never-deployed controls returning null. `RISC0_DEV_MODE=0` is exported for every process, so no dev-mode skip path is taken anywhere. Local-only, not CI: it needs a LEZ checkout the runners do not have (criterion 30's CI e2e is the read-only `sdk/tests/e2e.rs`). What `RISC0_DEV_MODE=0` does and does not buy for an all-public program is stated below rather than glossed |
+| criterion | status | evidence |
+|---|---|---|
+| Deployed and tested on testnet 0.3 | **open** | pending funding |
+| Builds and runs end to end on macOS (Apple Silicon) and Linux (x86_64) | **partial** | run end to end on macOS; the Linux path is the CI e2e job, not yet run on this branch |
+| Logos Core module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/` builds with CMake against Qt 6.9.2; the `mkLogosModule` path is not yet done |
+| IDL for the registry; the registry registered in itself | **partial** | registered in itself by its own header key (local); IDL hand-maintained, not SPEL-generated (see above) |
+| E2E tests against a real standalone sequencer in CI, green on the default branch | **partial** | `scripts/e2e-v03-local.sh` is the CI e2e job; not yet run on GitHub for this branch |
+| README: setup, deployed program id, CLI and module usage | **partial** | everything except the program id, which waits for the deployment |
+| SDK worked example: program id to metadata and IDL | **met** | `sdk/examples/resolve.rs`, README |
 
 ## Adoption
 
-Every item here is **open**, and none of it is a coding task.
-
-The final text's figures (the August draft asked for more):
-
-| Criterion | Note |
-|---|---|
-| 5 third-party Logos UI Modules integrating the SDK, independent of us and of each other, with genuine commit history | needs other people |
-| 50 registered programs on the official zone, by ≥20 distinct author accounts independent of us, pointing at genuinely deployed programs with parseable IDLs | needs other people |
-| 20 entries with an independently rebuildable source claim | needs other people |
-| Registrations spread over ≥2 months, ≥10 in each month | needs **calendar time** — this cannot be compressed |
-| 20 Discord testimonials describing actual use | needs other people |
-| 20 Twitter/X testimonials, same standard | needs other people |
-
-The draft's "75 stars" is gone.
-
-## Where the final text differs from the draft this tracker was written against
-
-- **Deployer vs third-party entries.** The final text asks that the deployer's
-  entry be *signed by the account that deployed the program*. On v0.2.4 no such
-  account exists, which is why row 3 binds the canonical slot to reproducing
-  the bytecode instead. On 0.3 a program is a header account the deployer holds
-  the key to, so the deployer entry becomes the entry that account signs — see
-  [lez-0.3-migration.md](lez-0.3-migration.md). Row 3 is **partial** until that
-  lands.
-- **"Locally verified".** A user who rebuilds the recorded source and gets a
-  matching bytecode may mark the program locally verified *for themselves*.
-  **Met in the CLI**: `lez-registry verify <FILE> --expect <DIGEST> --mark --program <ID>` records
-  the mark in the user's config directory on a match (and writes nothing on a
-  mismatch), `local-verified` lists the marks, and `lookup` shows a marked entry
-  as *locally verified by you — your own rebuild, not a registry claim*. The
-  Basecamp panel does not show it yet.
-- **Cycle counts** are asked for in `cycle_bench` terms for register and update;
-  [CYCLES.md](../CYCLES.md) already reports executor cycles for both.
-
-The two-month requirement is the binding constraint. On-chain timestamps make it
-checkable directly from chain data, which is why the registration timestamp had
-to come from the sequencer's clock rather than from whoever is registering.
-
-## The timestamp, since it is load-bearing for Adoption
-
-A zkVM guest has no clock. The obvious workaround — let the client pass a
-timestamp — would make every date in this registry a number chosen by the party
-whose adoption it evidences.
-
-LEZ maintains clock accounts at fixed addresses, written by the sequencer:
-
-```
-/LEZ/ClockProgramAccount/0000001   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU
-/LEZ/ClockProgramAccount/0000010   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWSs
-/LEZ/ClockProgramAccount/0000050   4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWkX
-```
-
-Each holds `{ block_id: u64, timestamp: u64 }`. `register` and `record_rebuild`
-take one as an input account and refuse it unless it is owned by the clock
-program — pinned by ImageID
-`319fbc054d77207cbaec0b31e9cc813eca0b40d310d7112ec4a0fe64395c61fc`, checked
-against `artifacts/lez/programs/clock.bin` and against the live account's own
-`program_owner` — and unless its address is one of the three above. Both checks
-matter: the owner check stops a caller supplying an account owned by a program
-they wrote, and the address check stops them supplying some *other* account the
-clock program happens to own.
-
-So the date on an entry is the sequencer's, not the registrant's.
-
-## The content identifier is 38 bytes, not 32
-
-This was going to be a field that could not hold what the criterion requires.
-
-`ContentId` was `[u8; 32]` — the size of a digest. A real Logos Storage
-identifier is larger. Two taken from a live node,
-`zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ` and
-`zDzSvJTf49uAN2BZhoMhZmDVSv7KDVeUVXTXvDc6QNnU1TKJYD55`, decode to **38 bytes**
-each:
-
-```
-01        CIDv1
-819a03    codec (the second identifier's is 839a03 — they differ)
-1220      multihash: sha2-256, 32 bytes
-…32 bytes digest
-```
-
-A 32-byte field would have kept the digest and dropped the codec, so nothing
-could have reconstructed the identifier well enough to fetch anything — and the
-failure would have looked like an empty IDL rather than a truncated pointer.
-
-The identifier is therefore stored whole and passed to `update` in its multibase
-`z…` form, which is what a Storage node hands you. `decode_content_id` refuses
-anything malformed rather than half-decoding it, and checks the CIDv1 marker, so
-a plausible-but-wrong string fails at the boundary instead of turning into a
-fetch that quietly returns nothing.
-
-serde does not implement its traits for arrays past 32, which is why the
-instruction takes a string rather than bytes. Splitting a 38-byte identifier
-across two array arguments would have worked and would have invited a caller to
-reassemble it wrongly.
-
-## The local-sequencer e2e, and what `RISC0_DEV_MODE=0` exercises
-
-`scripts/e2e-local-sequencer.sh` closes criterion 33: from a clean clone, one
-command starts a real standalone `sequencer_service` on a throwaway local port,
-funds the genesis test signer, deploys this registry's sealed guest to that local
-chain, initialises it, registers the canonical entry, and reads it back — the same
-lifecycle the public testnet ran, against a chain that exists only for the length
-of the run. It is deliberately kept out of CI: it needs the local LEZ checkout
-that carries the standalone sequencer and wallet, which the runners do not have,
-so the CI end-to-end (criterion 30) stays the read-only `sdk/tests/e2e.rs`.
-
-The one thing worth stating plainly is what `RISC0_DEV_MODE=0` buys here, because
-a PASS line that implied "minutes of real proving" would overclaim. The registry
-is an all-*public* SPEL program. LEZ executes a public transaction on the
-sequencer with risc0's `default_executor().execute()` — the real guest ELF and
-the real 32M-cycle limit, but **without** a per-transaction STARK
-(`lee/state_machine/src/program/mod.rs`, comment "Execute the program (without
-proving)"). Real STARK proving in LEZ is the client-side privacy-circuit proof,
-which a registry has no reason to use. So `RISC0_DEV_MODE=0` here is the
-*no-skip-path* half of the criterion — the sequencer, `spel` and the wallet all
-run with dev mode off, so nothing substitutes a fake receipt or a mocked verifier
-— rather than a long proof to wait on. What is exercised for real is the
-addressing and the checks: the program is deployed and called by its true RISC0
-ImageID, recomputed by the sequencer from the ELF, and `register` lands only
-because the guest, executed for real, agrees that the supplied clock account is
-owned by the pinned LEZ clock ImageID and that every derived seed matches. A run
-that finishes in seconds is correct rather than suspicious — the inverse of the
-privacy-path lifecycles, where a fast proof would be a faked one. The observed
-sequencer execution times are single-digit milliseconds per transaction, which is
-the executor doing real work with no proof attached, exactly as the design says.
+All open, and none of it is code: 5 independent third-party Logos UI modules
+using the SDK; 50 programs registered on the official zone by at least 20
+independent authors; 20 entries with independently rebuildable source claims;
+registrations over at least two months with at least 10 a month; 20 Discord and
+20 X testimonials. The two-month window starts with the testnet v0.3
+deployment.

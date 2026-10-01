@@ -296,9 +296,12 @@ pub fn build_register(
             Role::Directory,
             true,
         ),
-        // For a deployer entry the program's account is also the author, so
-        // it signs; the runtime then marks both of its selectors authorized.
-        header_input(req.program, req.deployer),
+        // Read-only. For a deployer entry the author below is the program's
+        // own account, so its signature authorizes both of its selectors; the
+        // header selector itself never needs to sign. Leaving it unsigned is
+        // also what lets a stranger's deployer attempt reach the chain and be
+        // refused there, rather than failing for want of a key.
+        header_input(req.program, false),
         signer(registry, *req.author, Role::Author),
     ];
     Ok(BuiltTransaction::new(registry, &ix, accounts))

@@ -1,317 +1,248 @@
-# Provenance — the LEZ program registry
+# Provenance: the LEZ program registry
 
 **Provenance** tells you what a program on the Logos Execution Zone is, who
 published it, and whether its bytecode was built from the source it names.
 
-A program ID on the Logos Execution Zone is an opaque 32 bytes. Nothing in it
+A program on LEZ v0.3 is an account: a header its deployer signed for, pointing
+at bytecode whose RISC0 ImageID the loader recorded. Nothing in that account
 says what the program does, who wrote it, what its interface looks like, or
-whether the source you are reading is the source that is running.
+whether the source you are reading is the source that is running. Provenance is
+an on-chain registry that answers those questions, and tooling that answers the
+last one honestly.
 
-This is a registry that answers those questions on chain, and a verification
-tool that answers the last one *honestly*.
+> **Status: ported to LEZ v0.3.0.** The program, SDK, CLI, indexer, explorer and
+> Basecamp module target v0.3.0 (`db66590ab`). The whole lifecycle runs against
+> a real v0.3.0 standalone sequencer: [`evidence/e2e-v03-local.txt`](evidence/e2e-v03-local.txt).
+> **Testnet v0.3 deployment: pending funding.** The program id goes here and in
+> [`DEPLOYMENTS.md`](DEPLOYMENTS.md) once it is deployed; the commands are in
+> [`docs/deploy-v03.md`](docs/deploy-v03.md).
 
-> **Status: building toward the LP-0023 submission.** The SPEL program is deployed
-> and live on the public testnet; the CLI and SDK register, update, resolve and
-> search in process; the Basecamp module browses, searches and shows full entry
-> detail; and a read-only, self-hostable web explorer serves the whole registry.
-> What is not yet done is named in `docs/criteria-evidence.md` rather than glossed.
-
-## Live on the public LEZ testnet
-
-| | |
-|---|---|
-| ProgramId | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
-| deploy | `b31782fc1e723c51b15f0663a66aab71c96aef5d07e5f99e544ce69f6bfb2953`, block 17910 |
-| global state | `75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z` |
-| endpoint | `https://testnet.lez.logos.co` |
-
-Built **sealed** — the network is disabled for every build container, so the
-guest cannot fetch anything `Cargo.lock` did not already pin. That is what lets
-a rebuild mean something; see [`scripts/build-sealed.sh`](scripts/build-sealed.sh).
-
-It holds six entries covering all five verification states, and every one of
-them is true rather than staged. [`DEPLOYMENTS.md`](DEPLOYMENTS.md) lists them.
-
-## Try it
+## Run it
 
 ```bash
-cargo build --release --manifest-path cli/Cargo.toml
-CLI=./cli/target/release/lez-registry
-
-# Resolve a program. One hash, one account read, no index — and none exists
-# to consult: LEZ has no account enumeration.
-$CLI lookup f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
-
-# Where that entry lives, computed without touching the network. Prints the
-# account to read, and the seed to hand to `spel --entry-seed`.
-$CLI entry-address f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
-
-# Browse. Linear, and openly so — this is what the optional indexer accelerates.
-$CLI search ""
-$CLI search mismatched
-
-# Check a local binary against what was deployed. The digest IS the deploy
-# transaction hash, so this needs no explorer to vouch for it.
-$CLI deployment-digest artifacts/programs/lez_registry.bin
-
-# What a verification state actually supports, in words.
-$CLI verify --explain
+./scripts/demo.sh
 ```
 
-### Registering and verifying a program
+From a clean clone on macOS (Apple Silicon) or Linux (x86_64). It fetches LEZ
+v0.3.0 into `_external/lez` (or uses `LEZ_SRC`), builds the standalone
+sequencer and the wallet once, then runs `scripts/e2e-v03-local.sh`: deploy the
+registry through the v0.3 wallet, register it in itself, rebuild it from source
+with the network denied and verify it, refuse an unauthorised deployer entry on
+chain, publish a third-party entry, update, record a mismatch, make a verdict
+stale by repointing a header, freeze, then list, search and resolve. Needs Rust,
+the RISC0 toolchain (`rzup`), `python3` and `curl`.
 
-Writing to the registry is signed, so it goes through `spel` with a wallet:
+## How it works on v0.3
 
-```bash
-export LEE_WALLET_HOME_DIR=~/.lez-wallet
-export REGISTRY=f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8
-export CLOCK=4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNU   # the sequencer's clock
+**Entries are keyed by the program account.** A program's deployer entry lives
+at `pda(registry, sha256("lez-registry:entry:v1" ‖ program))`; a third party's
+entry about it at the same with `":third-party:" ‖ publisher` added. Resolving a
+program is one hash and one account read, with no index in the path.
 
-# 1. Build sealed and read the fields a claim needs.
-./scripts/build-sealed.sh
-./scripts/verify-source.sh          # refuses if your tree differs from HEAD
+**The deployer entry is provable.** On v0.3 the loader refuses to create a
+program header unless the header account signs, so the header key is the
+deploy authority. `register` without `--third-party` requires the author to be
+that same account, signing. Anyone else's attempt is refused on chain (error
+`E9010`, shown in the transcript), and clients tell the two apart from the
+entry's `publisher` field without trusting any service.
 
-# 2. Register, claim the source, record the rebuild.
-#    scripts/populate-demo.sh does all three and is the shortest way to see it.
-REGISTRY=$REGISTRY ./scripts/populate-demo.sh
-```
+**The recorded image and frozen flag are checked on chain.** `register`,
+`record_rebuild` and `sync_header` carry the header the client read; the guest
+emits a read-only effect on the program's `program_loader` shard that fails
+unless the header there is exactly that `(image_id, immutable)`. The entry
+records both, so a verdict is always about a specific ImageID, and a verdict
+about an immutable header can never go stale.
 
-`verify-source.sh` refuses outright when tracked sources differ from `HEAD`: a
-claim names a commit, and a commit that does not contain what was built is a
-claim that was false when it was written.
+**Time comes from the chain.** The client reads the clock account and passes
+`Stamp { block, millis }`; the guest sets the transaction's block and timestamp
+validity windows to `[block, block + 600)` and `[millis, millis + 600000)`,
+which the runtime enforces. A registration time is never in the future and at
+most ten minutes older than the block that includes it.
 
-### The Basecamp module
+**One instruction enum.** `lez_registry_core::instruction::Instruction` (borsh)
+is decoded by the guest and built by the SDK, so a transaction the SDK builds
+is by construction one the program decodes.
 
-[`app/`](app/README.md) — browse the registry, filter it, and see one entry in
-full. Build it, package it, and check it loads the way Basecamp does:
+### The seven instructions
 
-```bash
-cd app
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/Qt/6.9.2/macos -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j4
-python3 ../scripts/package-lgx.py
-```
-
-Qt **6.9.2** specifically: Basecamp 0.2.2 bundles that version and the bundled
-version is a ceiling, so a plugin built against a newer Qt is rejected at load.
-
-### The web explorer
-
-[`explorer/`](explorer/README.md) — a public, read-only web view of the whole
-registry: browse, search by name or author, and open any entry to its full
-metadata, IDL, source claim, and the account derivation that reproduces its
-address on screen. It is the block explorer the LEZ does not otherwise have.
-
-```bash
-docker build -f explorer/Dockerfile -t lez-registry-explorer . \
-  && docker run --rm -p 8080:8080 lez-registry-explorer
-```
-
-It is a *view*, not an authority: no database, no private index, no external CDN
-or analytics — it reads the chain and Logos Storage directly, so anyone can run
-their own instance from this source and get identical bytes, and the registry
-works completely without it. The explorer even verifies itself: it hashes its own
-running binary and shows that digest, with its source and commit, on `/about`.
-
-### Check the whole document
-
-```bash
-./scripts/verify-onchain.sh
-```
-
-Re-checks every claim in `DEPLOYMENTS.md` against the live chain, derives the
-account addresses from the artifact rather than trusting the file, and carries
-two never-deployed hashes as controls — a `getTransaction` that answers "yes" to
-those is answering yes to anything.
-
-## What "verified" means here, and what it does not
-
-Verification proves exactly one thing: **rebuilding the stated source, at the
-stated commit, with the stated toolchain, produces the bytecode that is
-deployed.** It does not prove the program is safe, that the author is who they
-say they are, or that the code does what its README claims. Anywhere this
-registry shows verification status it will say so, because a green tick teaches
-users the opposite.
-
-### Two digests, and the registry says which is which
-
-A program on LEZ has two 32-byte numbers attached to it, and they are not the
-same number:
-
-| | what it is | how you get it |
+| instruction | who | accounts |
 |---|---|---|
-| **ProgramId** | the RISC0 ImageID, derived from the guest ELF's own structure | `spel program-id`, or risc0's `binfmt` |
-| **deployment digest** | `SHA256(u32_le(len) ‖ bytes)` over the packaged `.bin` | `lez-registry deployment-digest` |
+| `initialize` | anyone, once | global |
+| `register` | the program's header account (deployer entry) or any signer (third-party) | entry, global, directory, program@loader, author |
+| `update` (version, description, IDL pointer) | the entry's author | entry, author |
+| `claim_source` (repository, commit, source digest, build config) | the entry's author | entry, author |
+| `record_rebuild` | anyone; the attester is recorded | entry, program@loader, attester |
+| `sync_header` | anyone | entry, program@loader |
+| `freeze` | the entry's author, one way | entry, author |
 
-For this registry's own program those are
-`f6a765c2a316da6344de3cccfb39868732a4102f93ff9f0cc8d55be2d7c9e577` and
-`447263aa8e01b2d3b5cbb4c603b61194d5909b0158f3901e88d282202d9cb604`.
+`claim_canonical` from the v0.2.4 design is gone: v0.2.4 had no deploy
+authority, so the canonical slot had to be won by rebuilding; v0.3 has one.
 
-The second one is also the hash of the transaction that deployed it — which is
-the useful thing about it, and the trap. It is tempting to read
-`SHA256(len ‖ bytes)` as "LEZ's content addressing" and key a registry on it, so
-that an entry's hash and the program's address are one number instead of two
-that usually agree. That is wrong, and it was wrong here first: the CLI printed
-the deploy transaction hash under the heading `program-id` until it was run
-against a real deployment and disagreed with `spel`. A registry keyed that way
-resolves nothing, because nothing ever calls a program by that number.
-
-So the crate names them apart, and never computes the ImageID itself — that
-definition lives in risc0, and a second implementation of it would be a second
-thing that can drift. What the registry stores is the ProgramId as the key and
-the deployment digest as the artifact, and `verify` reports which of the two it
-checked.
-
-### A hash match is not provenance
-
-Solana's verified builds were subverted by a repository whose `build.rs`
-downloaded the already-deployed binary at compile time and emitted it. The
-rebuild matched perfectly. The source proved nothing.
-
-Any registry that only compares hashes inherits that hole, so this one does not
-only compare hashes. A build records whether it ran **with the network
-disabled**, and a claim rebuilt with network access **cannot reach `Verified`** —
-it stops at `Unreproducible`, which is a different word on screen and a
-different state in the type system.
-
-### Four states, and none of them is a tick
+### Verification states
 
 | state | meaning |
 |---|---|
-| `Unclaimed` | no source asserted — the honest default |
+| `Unclaimed` | no source asserted: the honest default |
 | `Claimed` | a source is asserted and nobody has rebuilt it |
-| `Verified` | rebuilt offline, and the bytecode matched what is deployed |
-| `Unreproducible` | rebuilt, but with the network up, so the match proves nothing |
+| `Verified` | rebuilt with the network disabled, and the ImageID matched the header on chain |
+| `Unreproducible` | rebuilt, but the claimed build had network access, so the match proves nothing |
+| `Mismatched` | rebuilt, and it does not produce the deployed ImageID |
+| `Stale` | a verdict was recorded, then the header was repointed at different bytecode |
 
-**There is deliberately no `Stale`.** Registries for account-addressed chains
-need one: code at an address can be replaced under a verification that was
-honestly earned, so the badge has to decay, and the decay has to be distinguished
-from failure — "failed" reads as *someone tried to cheat*, while an upgraded
-program has simply moved on.
+Verification proves one thing: rebuilding the stated source at the stated
+commit with the stated toolchain produces the bytecode that is deployed. It
+does not prove the program is safe. A badge always carries its attester, and
+`is_self_attested` says when the only voucher is the author.
 
-None of that applies here, and it took removing a working implementation of it to
-see why. An entry is keyed by its ImageID, so the bytecode *is* the key. Nothing
-can be swapped beneath an entry. The only way to have different bytecode is to be
-a different entry, which starts `Unclaimed` like every other.
+## CLI
 
-So verification is still version-bound — an author cannot verify something benign,
-upgrade to anything, and keep the badge — but the binding lives in the addressing
-rather than in a state transition, and costs no state machine at all. What is left
-is four states a UI can actually render, none of which is unreachable.
+```bash
+cargo build --release --manifest-path cli/Cargo.toml
+export LEZ_RPC=https://testnet.lez.logos.co        # or a local sequencer
+export PROVENANCE_REGISTRY=<registry account>      # pending the v0.3 deployment
 
-`record_rebuild` takes the entry's own key as its subject and has no third
-"currently deployed" argument, because such an argument could only ever hold one
-value, and a parameter with one legal value is somewhere for a caller to be wrong.
+lez-registry lookup <PROGRAM>                      # resolve: one hash, one read
+lez-registry lookup <PROGRAM> --publisher <ACCOUNT>
+lez-registry list
+lez-registry search token
+lez-registry program-header <PROGRAM>              # ImageID and frozen flag from the loader
 
-### The badge carries a name, because the chain cannot compile
+lez-registry register <PROGRAM> --name N --version V --description D --idl z… \
+  --repo URL --commit HEX40 --source-digest HEX --image-digest HEX --toolchain T --offline \
+  --key header.key --payer payer.key               # add --third-party for your own entry about it
+lez-registry update <PROGRAM> --version V --idl z… --key author.key --payer payer.key
+lez-registry claim-source <PROGRAM> --repo … --key author.key --payer payer.key
+lez-registry record-rebuild <PROGRAM> --file rebuilt.bin --key attester.key --payer payer.key
+lez-registry sync-header <PROGRAM> --payer payer.key
+lez-registry freeze <PROGRAM> --key author.key --payer payer.key
 
-A registry cannot verify a build. It has no compiler, and a rebuild is a claim
-made *about* the world rather than a computation the runtime can redo. Every
-registry that prints "Verified" is therefore relaying somebody's word, and the
-only real choice is whether it tells you whose.
+lez-registry verify rebuilt.bin --program <PROGRAM> --mark   # locally verified, for you only
+lez-registry image-id rebuilt.bin
+```
 
-`record_rebuild` is callable by anyone and records the signer as the entry's
-`attester`. Restricting it to the author would make `Verified` mean "the author
-says so", which is the thing the state exists to improve on; opening it without
-recording who called would make the badge anonymous, which is worse. So the badge
-always comes with a name, and `is_self_attested` answers the question a reader
-actually has — is the only party vouching for this build the party that shipped
-it?
+Keys are files holding a 32-byte secret in hex, the form
+`wallet account import public --private-key` takes, so the same account works
+in the LEZ wallet and here (`lez-registry keygen --out FILE` makes one). The fee
+payer must hold LGO. On v0.3 a failed call is charged and reverted rather than
+rejected, so after every write the CLI reads the chain back and prints
+`REVERTED` when nothing changed.
 
-That is not an accusation. An author who rebuilds their own release reproducibly
-has done something useful; it is simply weaker evidence than an independent
-rebuild, and rendering both as one tick would hide the difference that matters
-most.
+## SDK: resolve a program id to metadata and IDL
 
-A failed attempt is recorded too, and getting that right required being caught
-first. The instruction originally wrote `Unreproducible` and *then* returned an
-error, which reads correctly and does not work: an erroring instruction aborts
-its transaction, so the post-state never lands. Running it against the live
-testnet and reading the account back showed the entry still `Claimed` with no
-attester — the recorded refusal existed only in the source. The write and the
-error were mutually exclusive all along.
+This is the path a wallet or explorer takes ([`sdk/examples/resolve.rs`](sdk/examples/resolve.rs)):
 
-So the outcomes are now split by whether there is anything to record. A networked
-build is an outcome: `Unreproducible`, attester named, committed by returning
-`Ok`, and pointedly not counted in `total_verified`. A mismatch or a missing
-claim changes no state, so it stays an error. Nobody can grief an entry through
-the first path, because the verdict is a function of the claim the author wrote —
-anyone reading it can already see the build was networked.
+```rust
+use lez_registry_sdk::{entry_address, parse_account, Client, VerificationState};
 
-What the chain does enforce is the one condition that makes a matching rebuild
-mean anything: the claimed environment must have had the network disabled. That
-check is cheap, and it is the check the Solana incident turned on.
+let registry = parse_account("<registry account>").unwrap();
+let program = parse_account("<program account>").unwrap();
+let client = Client::new("https://testnet.lez.logos.co", registry);
 
-## The design decisions, taken and justified
+// Where the answer lives: a pure function of the two ids. No index.
+let addr = entry_address(&registry, &program);
 
-The prize leaves four questions open. Our positions:
+match client.entry(&program)? {
+    None => println!("unknown program"),
+    Some(e) => {
+        println!("{} {} by {:?}", e.name, e.version, e.author);
+        // The IDL lives on Logos Storage; the entry holds its content id. If it
+        // cannot be fetched or parsed, show the entry anyway, IDL unavailable.
+        let idl = e.idl;
+        // Is the verdict about the bytecode that runs now?
+        let live = client.program_header(&program)?;
+        let current = live.is_some_and(|h| h.image_id == e.image_id);
+        let verified = current && e.verification.state == VerificationState::Verified;
+    }
+}
+```
 
-**What lives on chain?** The entry, its metadata and its verification state. The
-IDL JSON lives on **Logos Storage**, with only its content identifier on chain,
-because an IDL is kilobytes and an on-chain kilobyte is paid for by everyone who
-syncs the zone.
+Writing goes through the same crate: `build_register` and friends produce a
+`BuiltTransaction` (borsh instruction plus shard selectors), and
+`Client::submit` signs it with BIP-340 keys, adds the fee payer as co-signer,
+sends it with `sendTransaction`, and waits for inclusion. `cargo run --example
+resolve -- <REGISTRY> <PROGRAM>` runs the example.
 
-**Where does verified source live?** A repository URL is a *liveness dependency
-on a third party* — GitHub can disappear and the claim becomes uncheckable. So a
-claim also carries `source_digest`, a hash over the source tree as built. Any
-mirror that reproduces that digest is as good as the original host, which turns
-the URL from a dependency into a hint.
+## The IDL, and why it is hand-maintained
+
+The prize asks for the registry program to be built with SPEL and its IDL to be
+generated by SPEL. SPEL has no release for LEZ v0.3: its latest,
+`v0.7.0-rc.2` (2026-09-28), still pins LEZ v0.2.4, whose program model
+(pre/post account states, ImageID program ids) v0.3 replaced with plan/apply
+over per-program shards and header accounts. A SPEL build of this program
+cannot run on v0.3, so the v0.3 guest is written against `lee_core` v0.3.0
+directly.
+
+The IDL, [`idl/lez_registry.idl.json`](idl/lez_registry.idl.json), is therefore
+written by hand **in SPEL's IDL format**, and kept honest by
+[`sdk/tests/idl_drift.rs`](sdk/tests/idl_drift.rs), which:
+
+- parses it with SPEL's own IDL types (`spel-framework-core/src/idl.rs`,
+  vendored under `vendor/spel/` with SPEL's licences);
+- checks the instruction list against the instruction enum, in order;
+- borsh-encodes a sample of every instruction and account type with the real
+  types and decodes it back using only the IDL, field by field;
+- compares every instruction's accounts with what the SDK puts on the wire;
+- checks every error code the guest raises is listed, and nothing else is.
+
+Reordering, renaming or retyping a field in either place fails the test. When
+SPEL ships v0.3 support, the IDL is regenerated with it and this test becomes a
+comparison of two generated files.
+
+## Basecamp module, explorer, indexer
+
+- [`app/`](app/README.md): the Logos Core / Basecamp UI module. Browses,
+  filters and resolves entries by deriving addresses locally and reading the
+  registry's shard; holds no keys. Set `PROVENANCE_REGISTRY` (and `LEZ_RPC`).
+  Build with Qt 6.9.2 (`cmake -S app -B app/build ...`), package with
+  `scripts/package-lgx.py`.
+- [`explorer/`](explorer/README.md): a read-only, self-hostable web explorer
+  for the registry (`--registry <ACCOUNT> --endpoint <URL>`), no database, no
+  CDN, no analytics.
+- `indexer/`: optional self-hostable search
+  (`lez-registry-indexer <REGISTRY> --endpoint <URL>`). Every result can be
+  re-derived and re-read without it.
+
+## Design positions
+
+**What lives on chain?** The entry: metadata, the header's ImageID and frozen
+flag, the source claim and the verdict. The IDL JSON and the source live off
+chain, on Logos Storage and the named repository; the entry holds their
+pointers. An IDL is kilobytes, and an on-chain kilobyte is paid for by everyone
+who syncs the zone.
+
+**Where does verified source live?** A claim carries `source_digest`, a hash
+over the source tree as built, as well as the repository URL. Any mirror that
+reproduces the digest is as good as the original host, so the URL is a hint
+rather than a liveness dependency.
 
 **Is there a trusted-signer overlay?** No. The registry records whether an entry
-came from the program's own deploy authority (`Canonical`) or from anyone else
-(`ThirdParty`) and **refuses to rank them**. Deciding which strangers to trust is
-curation, and curation is explicitly out of scope. Recording who said it is not.
+came from the program's deployer or anyone else and who attested each verdict,
+and refuses to rank them. Deciding which attesters to trust is the reader's.
 
-**Can entries be frozen?** Yes, one-way. `freeze` sets a flag no call in this
-crate lowers, and frozen beats authorship — after freezing, even the author is
-refused. An entry that can always change and an entry that can never change have
-different trust properties, and an author should be able to choose the second.
+More in [`docs/design-positions.md`](docs/design-positions.md).
 
-## Addresses are derivable without an index
+## Cost
 
-An entry's address is a function of the program ID alone, so a client resolving
-a program computes the address it needs rather than asking a service. An index
-required for lookup would be an external dependency, and *no mandatory external
-services* is a requirement rather than a preference.
-
-Third-party entries are keyed by their publisher, so **a stranger can never
-occupy the canonical address** — by construction, not by a check that could be
-forgotten. Seeds are domain-separated so one kind of address cannot collide with
-another.
+Every instruction is about 1% of the 10M execution-gas ceiling or less:
+`register` 105,403 cycles, `update` 55,611. Measured per plan and apply call in
+[`CYCLES.md`](CYCLES.md) with `tools/cycles-v03`.
 
 ## Layout
 
-- `src/lib.rs` — entry types, address derivation, the verification state
-  machine. `no_std`, no I/O, so the on-chain program and every client link the
-  *same* rules rather than two implementations that agree until they do not.
-- `program/` — the SPEL program: `initialize`, `register`, `claim_source`,
-  `record_rebuild`, `update`, `freeze`.
-- `cli/` — `deployment-digest`, `entry-address`, `verify`, and `explain-entry`,
-  which reports what a state supports rather than whether it has a badge.
-- `sdk/` — resolve an entry from a program id: one hash, one account read, no
-  index. Its tests pin the derivation against addresses that exist on the public
-  testnet, because a wrong derivation still returns a well-formed address that
-  simply has nothing at it.
-- `indexer/` — optional, self-hostable search. Holds no database and rebuilds
-  from the chain, and every result it returns can be re-derived without it.
-- `zkvm/` — the cycle harness behind [`CYCLES.md`](CYCLES.md).
-- `scripts/build-sealed.sh` — the guest build with the container's network
-  disabled. Only a binary from this may be claimed `network_disabled=1`.
-- `scripts/verify-source.sh` — what a rebuild establishes, and what it does not.
-- `scripts/verify-onchain.sh` — re-checks every claim in
-  [`DEPLOYMENTS.md`](DEPLOYMENTS.md) against the live testnet, controls included.
-- `scripts/demo.sh` — read-only walk through the live registry, macOS and Linux.
-
-## Measured, not asserted
-
-- [`DEPLOYMENTS.md`](DEPLOYMENTS.md) — what is live, including the same
-  instruction refusing a rebuild that matched.
-- [`CYCLES.md`](CYCLES.md) — a whole `register` body is 0.0197% of LEZ's 32M cap;
-  hashing this registry's own artifact on chain would be 91% of it, which is the
-  second and independent reason verification stays off chain.
-- [`LATENCY.md`](LATENCY.md) — 500 live lookups. Addresses that hold an entry and
-  addresses that never did resolve in 160ms and 159ms, which is what "lookup does
-  not depend on registry size" looks like when it is measured instead of claimed.
+- `src/lib.rs`: entry types, address derivation, the verification state
+  machine, the instruction enum. `no_std`, no I/O; the guest and every client
+  link the same rules.
+- `program/`: the v0.3 guest (plan/apply over `lee_core` v0.3.0).
+- `sdk/`: resolve, walk, build, sign and submit; `tests/idl_drift.rs`.
+- `cli/`: the `lez-registry` command.
+- `indexer/`, `explorer/`, `app/`: search, web view, Basecamp module.
+- `idl/`: the registry's IDL, in SPEL's format.
+- `scripts/e2e-v03-local.sh`: the full lifecycle on a local v0.3.0 sequencer.
+- `scripts/build-sealed.sh`: the guest build with the container's network off.
+- `scripts/verify-source.sh`, `scripts/verify-onchain.sh`: claim fields, and a
+  read-only re-check of a deployment.
+- `tools/guest-native`: build the guest without Docker; `tools/cycles-v03`:
+  cycle costs.
 
 ## Licence
 

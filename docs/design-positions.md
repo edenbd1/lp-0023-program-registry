@@ -1,113 +1,60 @@
 # Positions taken, and why
 
-The prize leaves four questions open and says the reasoning is part of what is
-evaluated. Two more had to be answered before any of those made sense, because
-LEZ does not have the thing the questions assume.
+The prize leaves three questions open and says the reasoning is part of what is
+evaluated. Two more had to be answered first, about what LEZ v0.3 makes
+provable.
 
-## 0. There is no deploy authority on LEZ, so "canonical" cannot mean what it means elsewhere
+## 0. The deployer is the header key
 
-The criterion asks for canonical entries "creatable only by the upgrade
-authority", following Solana's `program-metadata`. That construction has no
-counterpart here, and pretending otherwise would be the worst possible answer.
+On LEZ v0.3 a program lives at a header account its deployer chose, and the
+loader refuses to create or update that header unless the header account signs
+(`program_loader_core::create_header`, `update_header`). So the header key is
+the program's deploy authority, the counterpart of Solana's upgrade authority.
 
-LEZ deployment is **content-addressed and permissionless**. A program's id is the
-RISC0 ImageID of its bytecode. Anyone may deploy any bytes; deploying the same
-bytes twice yields the same id; there is no upgrade authority because there is no
-upgrade — different bytecode is a different program at a different address. Nobody
-owns a program id, and no on-chain fact says who first published one.
+The registry binds the deployer entry to it directly: `register` without a
+publisher requires the author to be the program's own header account, signing,
+and the entry's address is a function of the program id alone, so there is
+exactly one deployer entry and nobody else can occupy it. Everyone else
+publishes a third-party entry, keyed by their own account, beside it. Clients
+tell the two apart from the entry's `publisher` field, which only the program
+could have caused to read `Canonical`.
 
-So the honest options were:
+What this does not say: that the key holder wrote the code, or that the code is
+benign. It says the entry was published by whoever controls the program, which
+is the claim a wallet needs before showing a name next to a signature request.
 
-- **First-come canonical.** The prize names this as broken, and it is: an
-  attacker registers a popular program id under a plausible name before its
-  author does, and permanently owns the entry wallets will display.
-- **Bind canonical to the deploy transaction's signer.** Attractive, but a guest
-  cannot read historical transactions; there is no on-chain record it can reach
-  that links a program id to whoever submitted its deployment.
-- **Bind canonical to who can reproduce the bytecode from source.** This is the
-  position taken.
+The v0.2.4 design had no deploy authority to bind to, and made the canonical
+slot takeable by whoever could rebuild the deployed bytecode
+(`claim_canonical`). v0.3 makes that unnecessary, and it is gone.
 
-On a content-addressed chain, the party who can produce the bytecode from source
-in a sealed build is the closest thing to an authority that exists — and it is a
-stronger claim than a deploy signature, which only proves someone pressed the
-button. Front-running gains nothing durable: a squatter can occupy the canonical
-address, but cannot make it *verified*, because they cannot produce a matching
-offline rebuild without the real source.
+## 0b. Staleness is real on v0.3, and has a trigger
 
-**Implemented**, as `claim_canonical`: a canonical entry that is not yet verified
-can be taken by any account that submits a rebuild reproducing the deployed
-bytecode from a claim whose build was offline. A verified entry cannot be taken,
-or the takeover path would itself become the attack.
+A v0.3 header can be repointed at new bytecode unless it is immutable. So a
+verdict is about a specific ImageID, and the entry records that ImageID and the
+header's `immutable` flag, both checked on chain against the loader's shard
+whenever they are written.
 
-**And here is what it does not do**, because the honest version of this position
-is worth more than the flattering one.
-
-It does not identify the program's real author. Source is usually public, so a
-squatter who points at the real repository can rebuild it as readily as its
-maintainer, and would then hold the slot. First-to-verify replaces
-first-to-register, which is better — a squatter must at least do real work and
-tell the truth about where the code is — but it is not "the author wins".
-
-What changes is what holding the slot is *worth*. An entry cannot be verified
-while naming a repository that does not build it, so on a **verified** canonical
-entry the name, the description and the source URL are accurate even when the
-account holding it is a stranger. That is the property a wallet user actually
-needs — does this bytecode come from that source — and it is answered correctly
-regardless of who won the race.
-
-Authorship here is therefore **demonstrated capability, not identity**, and
-`is_self_attested` is what tells a reader which of the two they are looking at.
-
-One consequence worth naming, because it looks like a bug and is not: a takeover
-always produces a **self-attested** entry. The challenger becomes both the author
-and the attester in the same instruction, so by definition the only party
-vouching for the build is the party holding the entry. An independently verified
-entry needs someone *else* to run `record_rebuild` afterwards — which anyone can,
-and which is exactly the signal a reader should want.
-
-Demonstrated on chain at block 17862: one account registered the canonical entry
-and claimed the real source; a challenger submitting a rebuild that did not
-reproduce the bytecode was refused and the entry did not move; the same
-challenger submitting the correct rebuild took the entry and it became verified.
-Identity would need something this chain does not have: a deploy authority, or an
-off-chain attestation the registry would then have to trust.
-
-## 0b. Staleness, and why there is no `Stale` state
-
-The criterion asks that verification be version-bound, that a prior verified
-status be invalidated rather than carried over, and that the staleness window be
-documented.
-
-**The staleness window for an upgrade is zero, structurally.** An entry is keyed
-by the ImageID, so the bytecode *is* the key. There is no operation that changes
-the bytecode under an entry; different bytecode is a different key, hence a
-different entry, which starts `Unclaimed` like every other. A verified entry can
-never be showing a verdict about code that is no longer deployed, because the code
-under it cannot change.
-
-**The staleness window for a claim change is also zero**, and that one needed
-code: `claim_source` replaces the whole `Verification`, so re-pointing an entry at
-different source resets it to `Claimed`. The author cannot verify something benign
-and then quietly re-point the claim.
-
-What *can* age is the world outside the chain — a repository can be deleted, a
-commit force-pushed. That is why every verdict carries `last_checked` (block and
-millisecond, from the chain's clock) and why `source_digest` is stored: a digest
-over the source tree survives its host, so any mirror reproducing it is as good as
-the original.
+When the header moves, `sync_header` (callable by anyone) records the new
+ImageID and turns a verdict about the old one into `Stale`. The claim survives,
+so a rebuild of the new bytecode can be recorded without the author re-claiming.
+Clients do not need to wait for anyone to call it: comparing the entry's
+`image_id` with a fresh read of the header (`Client::program_header`) gives the
+same answer immediately, and the SDK example does exactly that. A verdict about
+an immutable header can never go stale, which is why the flag is shown next to
+it.
 
 ## 1. What lives on chain?
 
-**The entry, its metadata and its verification state — on chain. The IDL — on
-Logos Storage, by content identifier.**
+**The entry, its metadata, the header ImageID it is about, and its verification
+state: on chain. The IDL: on Logos Storage, by content identifier.**
 
 The entry is small, bounded, and read on every lookup; putting it on chain keeps
 resolution to one account read with no second system in the path. An IDL is
-unbounded and read rarely, and [CYCLES.md](../CYCLES.md) makes the cost concrete:
-`deployment_digest` runs at 62.6 cycles/byte, so hashing this registry's own
-443 KB artifact on chain would consume **91% of LEZ's entire 32M compute budget**
-before any logic ran. Large blobs do not belong in a program's account, and the
-number rather than the intuition is what decided it.
+unbounded and read rarely; on chain it would be paid for by every node that
+syncs the zone. The bytecode check needs no blob on chain either: the loader
+already recorded the ImageID in the header, and the registry compares 32 bytes
+against it ([CYCLES.md](../CYCLES.md): a `register` is about 1% of the 10M
+execution-gas ceiling).
 
 ## 2. Where does verified source live?
 
@@ -120,7 +67,7 @@ toward.
 
 The liveness dependency is real and is mitigated rather than denied: the claim
 stores a digest over the source tree *as built*, so a deleted repository does not
-make re-verification impossible — it makes it require a mirror, and any mirror
+make re-verification impossible - it makes it require a mirror, and any mirror
 reproducing the digest is as good as the original host. What is lost with the
 repository is discovery, not verifiability.
 
@@ -135,7 +82,7 @@ the rest of this design spends its effort avoiding. `is_self_attested` gives the
 one distinction that needs no list: whether the only party vouching for a build is
 the party that shipped it.
 
-A consumer who wants a trusted set can keep one — the attester is a plain account
+A consumer who wants a trusted set can keep one - the attester is a plain account
 id in the entry, so filtering is a client-side predicate over data the chain
 already gives them. That belongs to the consumer, not to the registry.
 

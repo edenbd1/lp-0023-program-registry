@@ -1,0 +1,22 @@
+# Measures what each registry instruction costs on LEZ v0.3: the RISC0 cycles
+# of its plan call plus every apply call, which is exactly what a public
+# transaction is charged as execution gas. Runs the real guest binary under the
+# same executor the sequencer uses (no proving), with inputs built by the SDK.
+[workspace]
+
+[package]
+name    = "provenance-cycles-v03"
+version = "0.3.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+lee_core          = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", rev = "db66590ab821a4e142c211017a3866d007f6fa77", features = ["host"] }
+risc0-zkvm        = { version = "=3.0.5" }
+lez-registry-core = { path = "../.." }
+lez-registry-sdk  = { path = "../../sdk" }
+borsh             = { version = "1.5", features = ["derive"] }
+
+[profile.release]
+overflow-checks = true

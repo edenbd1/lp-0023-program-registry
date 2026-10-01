@@ -23,7 +23,7 @@ use std::process::ExitCode;
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
 /// Gas (executed cycles) a registry call may use. A register runs the guest
 /// five times (one plan, four applies); override with PROVENANCE_GAS_LIMIT.
-const DEFAULT_GAS: u64 = 4_000_000;
+const DEFAULT_GAS: u64 = 1_000_000;
 
 fn usage() -> ExitCode {
     eprintln!(

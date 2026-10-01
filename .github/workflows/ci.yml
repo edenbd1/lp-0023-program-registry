@@ -2,16 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v0.3]
   pull_request:
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  # LEZ v0.3.0, the version every crate here and the guest target.
+  LEZ_COMMIT: db66590ab821a4e142c211017a3866d007f6fa77
 
 jobs:
   core:
-    name: Build, lint and test (${{ matrix.os }})
+    name: Build and test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -20,91 +22,76 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      # The gate is behaviour, not style: the build and the tests below decide
-      # whether this is green. Formatting and lints are the developer's job
-      # before a commit (`cargo fmt`, `cargo clippy`), not a reason for a
-      # correct commit to go red on a newer toolchain's taste.
+        run: rustup toolchain install stable --profile minimal && rustup default stable
 
       # Release, not debug: the release profile sets overflow-checks = true, so
-      # a missed checked_* panics here rather than wrapping on chain. Testing in
-      # debug would exercise different arithmetic from the one that ships.
-      - name: Tests
-        run: cargo test --release --verbose
+      # the arithmetic tested is the arithmetic that ships.
+      - name: Core tests
+        run: cargo test --release
 
-      # The core links into a RISC-V guest, which has no std. Building for a
-      # no_std target is the only way to find out that something pulled it in —
-      # `cargo test` runs on the host and would never notice.
-      - name: The core still builds without std
+      # The core links into a RISC-V guest with no std; a no_std target is the
+      # only way to notice something pulled std in.
+      - name: The core builds without std
         run: |
           rustup target add thumbv7em-none-eabi
           cargo build --release --target thumbv7em-none-eabi
 
-      # The CLI, SDK, indexer and program are separate workspaces, so none of
-      # the steps above touches them. A green tick that covered only the core
-      # while the README pointed at four crates would be worse than no tick.
-      - name: The other crates, built and tested
+      # Includes sdk/tests/idl_drift.rs: the hand-maintained IDL against the
+      # instruction enum, through SPEL's own IDL types.
+      - name: SDK, CLI, indexer, explorer
         run: |
-          for crate in cli sdk indexer explorer; do
+          for crate in sdk cli indexer explorer; do
             echo "::group::$crate"
             cargo test --release --manifest-path "$crate/Cargo.toml"
             echo "::endgroup::"
           done
 
-      # The program is a RISC0 guest: `risc0_zkvm::guest::entry!(main)` only
-      # resolves when it is built as the guest binary, so `cargo test` cannot
-      # build it and its absence from the loop above is deliberate. Building it
-      # still catches every type error the instructions can have.
-      - name: The guest program compiles
-        run: |
-          cargo build --release --manifest-path program/Cargo.toml
+      # The guest only links as a RISC0 binary, but a host build type-checks
+      # every instruction against lee_core v0.3.0.
+      - name: The guest type-checks against lee_core v0.3.0
+        run: cargo build --release --manifest-path program/Cargo.toml
 
-      # Scripts are deliverables here, not glue: verify-onchain.sh and demo.sh
-      # are how a reader checks the claims. A syntax error in one is a broken
-      # claim.
       - name: Shell scripts parse
         run: |
-          for s in scripts/*.sh scripts/sealed/docker; do
-            bash -n "$s" || exit 1
-          done
+          for s in scripts/*.sh scripts/sealed/docker; do bash -n "$s" || exit 1; done
 
-  # A separate job so a sequencer outage reads as "the network was down" rather
-  # than as "the code is broken". It is required rather than optional: a skipped
-  # integration test is an integration test that did not run, and reporting
-  # green for it would be reporting something untrue.
+  # The full lifecycle against a real LEZ v0.3.0 sequencer in standalone mode,
+  # RISC0_DEV_MODE=0: deploy, register in itself, the refused deployer entry,
+  # third-party entries, update, mismatch, stale, freeze, discovery, and the
+  # SDK's e2e tests. Required, not optional.
   e2e:
-    name: End to end against a real sequencer
+    name: End to end against a local LEZ v0.3.0 sequencer
     runs-on: ubuntu-latest
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y clang pkg-config libssl-dev protobuf-compiler cmake
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal && rustup default stable
-
-      # --ignored, not --include-ignored: these are the only tests this job
-      # exists to run, and a pass that came from the unit tests would hide a
-      # sequencer that answered nothing.
-      - name: Read the live registry
-        run: cargo test --release --manifest-path sdk/Cargo.toml -- --ignored --nocapture
-
-      - name: Re-check every claim in DEPLOYMENTS.md
-        run: ./scripts/verify-onchain.sh
-
-  # Criterion 27: the demo runs, unmodified, from a clean clone on both macOS and
-  # Linux. It is read-only against the public testnet, so it doubles as a
-  # cross-platform smoke test of the CLI the demo drives.
-  demo:
-    name: Demo runs from a clean clone (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Toolchain
-        run: rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Demo, unmodified
-        run: ./scripts/demo.sh
+      - name: RISC0 toolchain
+        run: |
+          curl -L https://risczero.com/install | bash
+          echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
+          "$HOME/.risc0/bin/rzup" install
+      - name: LEZ v0.3.0
+        run: |
+          git clone --quiet https://github.com/logos-blockchain/logos-execution-zone _external/lez
+          git -C _external/lez checkout --quiet "$LEZ_COMMIT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            _external/lez/target
+          key: lez-${{ env.LEZ_COMMIT }}-${{ runner.os }}
+      - name: Standalone sequencer and wallet
+        working-directory: _external/lez
+        run: |
+          cargo build --release -p sequencer_service --features standalone
+          cargo build --release -p wallet
+      - name: The lifecycle
+        env:
+          LEZ_SRC: ${{ github.workspace }}/_external/lez
+          REBUILD: "1"
+        run: ./scripts/e2e-v03-local.sh
