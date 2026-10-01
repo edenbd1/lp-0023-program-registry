@@ -1,0 +1,17 @@
+# Builds the registry guest without Docker, with the local RISC0 toolchain
+# (rzup), and writes the program binary. For local development and the local
+# end-to-end run; the reproducible artifact comes from scripts/build-sealed.sh.
+[workspace]
+
+[package]
+name    = "provenance-guest-native"
+version = "0.3.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[build-dependencies]
+risc0-build = "=3.0.5"
+
+[package.metadata.risc0]
+methods = ["../../program"]

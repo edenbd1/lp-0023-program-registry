@@ -453,7 +453,18 @@ impl Client {
         keys: &[&Keypair],
         payer: Option<&Keypair>,
     ) -> Result<Submitted> {
-        let fee = payer.map(|p| FeeDeclaration::default_for(p.account_id()));
+        self.submit_with_gas(tx, keys, payer, sign::DEFAULT_GAS_LIMIT)
+    }
+
+    /// [`Client::submit`] with an explicit gas limit (executed cycles).
+    pub fn submit_with_gas(
+        &self,
+        tx: &BuiltTransaction,
+        keys: &[&Keypair],
+        payer: Option<&Keypair>,
+        gas_limit: u64,
+    ) -> Result<Submitted> {
+        let fee = payer.map(|p| FeeDeclaration::with_gas(p.account_id(), gas_limit));
         let order = sign::signing_order(tx, fee.as_ref().map(|f| &f.payer));
         let nonces = self.nonces(&order)?;
         let mut all: Vec<&Keypair> = keys.to_vec();

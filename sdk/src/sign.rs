@@ -141,6 +141,18 @@ impl FeeDeclaration {
             max_fee: max_fee_for(DEFAULT_GAS_LIMIT),
         }
     }
+
+    /// A gas limit of your choosing, with the wallet's matching fee cap. Gas on
+    /// v0.3 is executed RISC0 cycles, summed over every plan and apply call.
+    #[must_use]
+    pub const fn with_gas(payer: AccountId, gas_limit: u64) -> Self {
+        Self {
+            payer,
+            gas_limit,
+            tip: 0,
+            max_fee: max_fee_for(gas_limit),
+        }
+    }
 }
 
 fn put_u32(out: &mut Vec<u8>, n: usize) {

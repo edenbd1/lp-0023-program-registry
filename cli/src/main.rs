@@ -21,6 +21,9 @@ use lez_registry_sdk::{
 use std::process::ExitCode;
 
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
+/// Gas (executed cycles) a registry call may use. A register runs the guest
+/// five times (one plan, four applies); override with PROVENANCE_GAS_LIMIT.
+const DEFAULT_GAS: u64 = 4_000_000;
 
 fn usage() -> ExitCode {
     eprintln!(
@@ -68,8 +71,12 @@ Verify locally
   local-verified                             your own marks, never on chain
   idl <CID> [--from <DIR>]                   check an IDL pointer, and resolve it offline
 
-Keys
-  keygen [--out <FILE>]                      a fresh public-account key"
+Keys and accounts
+  keygen [--out <FILE>]                      a fresh public-account key
+  account-id --key <FILE>                    the account a key controls
+  balance <ACCOUNT>                          native LGO balance
+
+Environment: PROVENANCE_GAS_LIMIT overrides the gas limit (default {DEFAULT_GAS})."
     );
     ExitCode::from(2)
 }
@@ -106,6 +113,18 @@ fn client(args: &[String]) -> Result<Client, String> {
         .ok_or("--registry <ACCOUNT> (or PROVENANCE_REGISTRY) is required")?;
     let reg = parse_account(&reg).ok_or("--registry is not a 32-byte account id")?;
     Ok(Client::new(rpc, reg))
+}
+
+/// A client for commands that read the chain but not the registry
+/// (`balance`, `program-header`, `verify`): the registry may be unset.
+fn chain_client(args: &[String]) -> Result<Client, String> {
+    client(args).or_else(|_| {
+        let rpc = flag(args, "--rpc")
+            .cloned()
+            .or_else(|| std::env::var("LEZ_RPC").ok())
+            .unwrap_or_else(|| DEFAULT_ENDPOINT.into());
+        Ok(Client::new(rpc, [0u8; 32]))
+    })
 }
 
 fn key_from(args: &[String], name: &str) -> Result<Keypair, String> {
@@ -185,6 +204,18 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }),
         "program-header" => program_header_cmd(&args),
+        "balance" => chain_client(&args).and_then(|c| {
+            let id = program_arg(&args)?;
+            println!("{}", c.balance(&id).map_err(|e| e.to_string())?);
+            Ok(ExitCode::SUCCESS)
+        }),
+        "account-id" => {
+            let k = key_from(&args, "--key");
+            k.map(|k| {
+                println!("{}", base58(&k.account_id()));
+                ExitCode::SUCCESS
+            })
+        }
         "lookup" => lookup_cmd(&args),
         "list" => search_cmd(&args, ""),
         "search" => search_cmd(&args, args.get(1).map_or("", String::as_str)),
@@ -223,6 +254,17 @@ fn keygen(args: &[String]) -> Result<ExitCode, String> {
 fn image_id_cmd(args: &[String]) -> Result<ExitCode, String> {
     let path = args.get(1).ok_or("image-id <BIN>")?;
     println!("{}", hex(&image_id_of(path)?));
+    // How many segment accounts `wallet program-loader deploy` needs: the
+    // loader stores the user ELF (not the kernel) in 96 KiB chunks.
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    if let Ok(bin) = risc0_binfmt::ProgramBinary::decode(&bytes) {
+        const SEGMENT: usize = 96 * 1024;
+        eprintln!(
+            "  user ELF {} bytes: {} loader segment(s)",
+            bin.user_elf.len(),
+            bin.user_elf.len().div_ceil(SEGMENT)
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -242,7 +284,7 @@ fn entry_address_cmd(args: &[String]) -> Result<ExitCode, String> {
 }
 
 fn program_header_cmd(args: &[String]) -> Result<ExitCode, String> {
-    let c = client(args)?;
+    let c = chain_client(args)?;
     let program = program_arg(args)?;
     match c.program_header(&program).map_err(|e| e.to_string())? {
         Some(h) => {
@@ -411,8 +453,18 @@ fn submit(c: &Client, tx: &BuiltTransaction, keys: &[&Keypair], payer: &Keypair)
         tx.signer_ids().len(),
         base58(&payer.account_id())
     );
-    let s = c.submit(tx, keys, Some(payer)).map_err(|e| e.to_string())?;
-    println!("  tx {}  included in block {}", s.hash, s.block);
+    let gas = std::env::var("PROVENANCE_GAS_LIMIT")
+        .ok()
+        .and_then(|g| g.parse().ok())
+        .unwrap_or(DEFAULT_GAS);
+    let before = c.balance(&payer.account_id()).ok();
+    let s = c.submit_with_gas(tx, keys, Some(payer), gas).map_err(|e| e.to_string())?;
+    let after = c.balance(&payer.account_id()).ok();
+    let fee = match (before, after) {
+        (Some(b), Some(a)) if b >= a => format!("  fee {}", b - a),
+        _ => String::new(),
+    };
+    println!("  tx {}  included in block {}{fee}", s.hash, s.block);
     Ok(s.block)
 }
 
@@ -624,7 +676,7 @@ fn verify_cmd(args: &[String]) -> Result<ExitCode, String> {
     let program = flag(args, "--program")
         .and_then(|s| parse_account(s))
         .ok_or("--program <PROGRAM> is required")?;
-    let c = client(args)?;
+    let c = chain_client(args)?;
     let rebuilt = image_id_of(path)?;
     let header = c
         .program_header(&program)
