@@ -15,8 +15,8 @@
 //! `/refresh`, which keeps "self-hostable" honest: there is no state to migrate,
 //! back up, or trust.
 
-use lez_registry_core::{Entry, VerificationState};
-use lez_registry_sdk::{base58, entry_address, Client};
+use lez_registry_core::{instruction::EntryKey, Entry, Publisher, VerificationState};
+use lez_registry_sdk::{base58, key_address, parse_account, Client};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
@@ -43,6 +43,7 @@ impl Index {
                     || e.description.to_lowercase().contains(&q)
                     || e.tags.iter().any(|t| t.to_lowercase().contains(&q))
                     || hex(&e.program_id).starts_with(&q)
+                    || base58(&e.program_id).to_lowercase().starts_with(&q)
                     || base58(&e.author).to_lowercase().contains(&q)
                     || state_word(&e.verification.state).contains(&q)
             })
@@ -57,6 +58,7 @@ const fn state_word(s: &VerificationState) -> &'static str {
         VerificationState::Verified => "verified",
         VerificationState::Mismatched => "mismatched",
         VerificationState::Unreproducible => "unreproducible",
+        VerificationState::Stale => "stale",
     }
 }
 
@@ -81,21 +83,32 @@ fn escape(s: &str) -> String {
 }
 
 fn entry_json(e: &Entry, idx: &Index) -> String {
-    let addr = base58(&entry_address(&idx.registry, &e.program_id));
+    let key = EntryKey {
+        program: e.program_id,
+        publisher: match e.publisher {
+            Publisher::Canonical => None,
+            Publisher::ThirdParty => Some(e.author),
+        },
+    };
+    let addr = base58(&key_address(&idx.registry, &key));
     // Every result carries the two facts needed to check it without this
     // service: where the entry lives, and that the address is derived rather
     // than looked up.
     format!(
-        r#"{{"name":"{}","version":"{}","description":"{}","program_id":"{}","author":"{}","verification":"{}","self_attested":{},"frozen":{},"registered_block":{},"last_checked_block":{},"entry_account":"{}","source":"derive pda(registry, sha256(\"lez-registry:entry:v1\" || program_id)) and read it; this index is not required"}}"#,
+        r#"{{"name":"{}","version":"{}","description":"{}","program_id":"{}","publisher":"{}","image_id":"{}","header_immutable":{},"author":"{}","verification":"{}","self_attested":{},"frozen":{},"registered_block":{},"registered_millis":{},"last_checked_block":{},"entry_account":"{}","source":"derive pda(registry, sha256(\"lez-registry:entry:v1\" || program_id)) for a deployer entry, or the third-party seed with the author, and read the registry's shard; this index is not required"}}"#,
         escape(&e.name),
         escape(&e.version),
         escape(&e.description),
-        hex(&e.program_id),
+        base58(&e.program_id),
+        if key.publisher.is_none() { "deployer" } else { "third-party" },
+        hex(&e.image_id),
+        e.header_immutable,
         base58(&e.author),
         state_word(&e.verification.state),
         e.verification.is_self_attested(&e.author),
         e.frozen,
         e.registered_at.block,
+        e.registered_at.millis,
         e.verification.last_checked.map_or(0, |s| s.block),
         addr,
     )
@@ -172,7 +185,7 @@ fn handle(mut stream: TcpStream, client: &Client, index: &Arc<RwLock<Index>>) {
             .count();
         let body = format!(
             r#"{{"registry":"{}","endpoint":"{}","indexed":{},"verified":{}}}"#,
-            hex(&idx.registry),
+            base58(&idx.registry),
             escape(&idx.endpoint),
             idx.entries.len(),
             verified
@@ -241,23 +254,11 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn parse_hex32(s: &str) -> Option<[u8; 32]> {
-    let s = s.trim().trim_start_matches("0x");
-    if s.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, byte) in out.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(out)
-}
-
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let Some(registry) = args.first().and_then(|s| parse_hex32(s)) else {
+    let Some(registry) = args.first().and_then(|s| parse_account(s)) else {
         eprintln!(
-            "usage: lez-registry-indexer <REGISTRY_PROGRAM_ID_HEX> [--endpoint URL] [--port N]"
+            "usage: lez-registry-indexer <REGISTRY_ACCOUNT> [--endpoint URL] [--port N]"
         );
         return std::process::ExitCode::FAILURE;
     };

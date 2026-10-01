@@ -31,7 +31,9 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const DEFAULT_REGISTRY: &str = "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
+/// No default registry: testnet v0.3 deployment is pending funding, and a
+/// default pointing at a superseded chain would show an empty registry as if
+/// it were real. Pass `--registry` or set `PROVENANCE_REGISTRY`.
 const DEFAULT_ENDPOINT: &str = "https://testnet.lez.logos.co";
 /// Loopback by default — a `--host 0.0.0.0` is the deliberate opt-in a container
 /// makes, and is what `explorer/Dockerfile` passes so the port can be published.
@@ -153,13 +155,17 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    // Registry may be the first positional arg or --registry; default is the
-    // live testnet deployment this repo documents.
-    let reg_hex = flag(&args, "--registry")
+    // Registry may be the first positional arg, --registry, or the
+    // PROVENANCE_REGISTRY environment variable.
+    let Some(reg_hex) = flag(&args, "--registry")
         .or_else(|| args.first().filter(|a| !a.starts_with('-')).cloned())
-        .unwrap_or_else(|| DEFAULT_REGISTRY.to_string());
+        .or_else(|| std::env::var("PROVENANCE_REGISTRY").ok())
+    else {
+        eprintln!("pass --registry <ACCOUNT> (or set PROVENANCE_REGISTRY): the registry program account to show");
+        return std::process::ExitCode::FAILURE;
+    };
     let Some(registry) = from_hex(&reg_hex) else {
-        eprintln!("registry must be 64 hex characters");
+        eprintln!("registry must be an account id, base58 or 64 hex characters");
         return std::process::ExitCode::FAILURE;
     };
     let endpoint = flag(&args, "--endpoint").unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
@@ -358,15 +364,12 @@ fn handle(mut stream: TcpStream, app: &App) {
         // do not depend on a successful walk.
         let stats = match app.snapshot() {
             Ok((entries, global)) => {
-                let verified = global.map_or_else(
-                    || {
-                        entries
-                            .iter()
-                            .filter(|e| e.verification.is_verified())
-                            .count() as u64
-                    },
-                    |g| g.total_verified,
-                );
+                // Counted from the walk: on v0.3 the global account keeps
+                // only the directory counter.
+                let verified = entries
+                    .iter()
+                    .filter(|e| e.verification.is_verified())
+                    .count() as u64;
                 let total = global.map_or(entries.len() as u64, |g| g.total_entries);
                 Some((entries.len(), verified, total))
             }
@@ -436,7 +439,7 @@ fn serve_detail(stream: &mut TcpStream, app: &App, site: &Site, rest: &str, quer
             &render::not_found(
                 site,
                 "Not a program id",
-                "A program id is 64 hex characters — the RISC0 ImageID a program is called by.",
+                "A program id is an account id (base58, or 64 hex characters): on LEZ v0.3 a program is the header account its deployer signed for.",
             ),
         );
         return;
@@ -529,6 +532,7 @@ fn state_word(s: &VerificationState) -> &'static str {
         VerificationState::Verified => "verified",
         VerificationState::Mismatched => "mismatched",
         VerificationState::Unreproducible => "unreproducible",
+        VerificationState::Stale => "stale",
     }
 }
 
@@ -564,14 +568,19 @@ fn search(entries: &[Entry], q: &str) -> Vec<Entry> {
 fn programs_json(app: &App, entries: &[Entry], global: Option<&GlobalState>) -> String {
     let mut items = Vec::with_capacity(entries.len());
     for e in entries {
-        let addr = sdk::base58(&sdk::entry_address(&app.cfg.registry, &e.program_id));
+        let addr = sdk::base58(&match e.publisher {
+            Publisher::Canonical => sdk::entry_address(&app.cfg.registry, &e.program_id),
+            Publisher::ThirdParty => {
+                sdk::third_party_entry_address(&app.cfg.registry, &e.program_id, &e.author)
+            }
+        });
         items.push(format!(
             r#"{{"name":{name},"version":{ver},"program_id":{pid},"author":{author},"publisher":{publisher},"verification":{state},"self_attested":{self_att},"frozen":{frozen},"registered_block":{block},"entry_account":{acct},"note":"re-derive: pda(registry, sha256(\"lez-registry:entry:v1\" || program_id)); this API is not required"}}"#,
             name = json_str(&e.name),
             ver = json_str(&e.version),
             pid = json_str(&hex(&e.program_id)),
             author = json_str(&sdk::base58(&e.author)),
-            publisher = json_str(match e.publisher { Publisher::Canonical => "canonical", Publisher::ThirdParty => "third-party" }),
+            publisher = json_str(match e.publisher { Publisher::Canonical => "deployer", Publisher::ThirdParty => "third-party" }),
             state = json_str(state_word(&e.verification.state)),
             self_att = e.verification.is_self_attested(&e.author),
             frozen = e.frozen,
@@ -584,7 +593,7 @@ fn programs_json(app: &App, entries: &[Entry], global: Option<&GlobalState>) -> 
         reg = json_str(&app.cfg.registry_hex),
         ep = json_str(&app.cfg.endpoint),
         total = global.map_or(entries.len() as u64, |g| g.total_entries),
-        ver = global.map_or(0, |g| g.total_verified),
+        ver = entries.iter().filter(|e| e.verification.is_verified()).count(),
         walked = entries.len(),
         items = items.join(","),
     )
@@ -603,6 +612,9 @@ fn hex(b: &[u8]) -> String {
 }
 
 fn from_hex(s: &str) -> Option<ProgramId> {
+    if let Some(id) = sdk::from_base58(s) {
+        return Some(id);
+    }
     let s = s.strip_prefix("0x").unwrap_or(s);
     if s.len() != 64 {
         return None;

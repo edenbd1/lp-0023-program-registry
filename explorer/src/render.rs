@@ -203,6 +203,12 @@ fn state_face(e: &Entry) -> StateFace {
             sentence:
                 "A rebuild was recorded, but the claimed build had network access, so a match would prove nothing about the source.",
         },
+        VerificationState::Stale => StateFace {
+            class: "v-unrepro",
+            label: "Stale".into(),
+            sentence:
+                "A verdict was recorded, then the program's header was repointed at different bytecode. The verdict is about code that no longer runs here; it needs a new rebuild.",
+        },
         VerificationState::Mismatched => StateFace {
             class: "v-mismatch",
             label: "Mismatched".into(),
@@ -241,7 +247,7 @@ fn badge(e: &Entry) -> String {
 fn publisher_tag(p: &Publisher) -> String {
     match p {
         Publisher::Canonical => {
-            r#"<span class="pub canonical" title="Published by an account that proved it can rebuild the deployed bytecode.">canonical</span>"#.to_string()
+            r#"<span class="pub canonical" title="Signed by the program's own header account: the key the loader required to deploy it.">deployer</span>"#.to_string()
         }
         Publisher::ThirdParty => {
             r#"<span class="pub" title="Published by another party. Not lesser, not greater — different.">third&#8209;party</span>"#.to_string()
@@ -543,10 +549,12 @@ pub fn list_page(site: &Site, entries: &[Entry], global: Option<&GlobalState>) -
         .iter()
         .filter(|e| matches!(e.publisher, Publisher::Canonical))
         .count();
-    let (declared_total, declared_verified) = global
-        .map_or((entries.len() as u64, verified as u64), |g| {
-            (g.total_entries, g.total_verified)
-        });
+    // The verified count is the walk's: on v0.3 the global account keeps only
+    // the directory counter.
+    let (declared_total, declared_verified) = (
+        global.map_or(entries.len() as u64, |g| g.total_entries),
+        verified as u64,
+    );
 
     let stats = format!(
         r#"<div class="stats">
@@ -718,6 +726,9 @@ pub fn detail_page(site: &Site, e: &Entry, publisher: Option<&AccountId>, idl: &
     let meta = format!(
         r#"<div class="panel"><h2>Entry</h2><div class="body"><dl class="kv">
   <div><dt>Program ID</dt><dd class="mono">{pid}{pid_copy}</dd></div>
+  <div><dt>Program account</dt><dd class="mono">{pid58}</dd></div>
+  <div><dt>Image ID</dt><dd class="mono">{image_id}{image_copy}</dd></div>
+  <div><dt>Header</dt><dd>{header_mut}</dd></div>
   <div><dt>Version</dt><dd class="mono">{ver}</dd></div>
   <div><dt>Author</dt><dd class="mono">{author}{auth_copy}</dd></div>
   <div><dt>Publisher</dt><dd>{publisher}</dd></div>
@@ -729,6 +740,14 @@ pub fn detail_page(site: &Site, e: &Entry, publisher: Option<&AccountId>, idl: &
 </dl></div></div>"#,
         pid = esc(&hex(&e.program_id)),
         pid_copy = copy_btn(&hex(&e.program_id)),
+        pid58 = esc(&sdk::base58(&e.program_id)),
+        image_id = esc(&hex(&e.image_id)),
+        image_copy = copy_btn(&hex(&e.image_id)),
+        header_mut = if e.header_immutable {
+            r#"<span class="mono">immutable</span>, so this verdict can never go stale"#
+        } else {
+            r#"<span class="mono">mutable</span>, the deployer may repoint it; the entry records the ImageID it saw"#
+        },
         ver = esc(&e.version),
         author = esc(&author_b58),
         auth_copy = copy_btn(&author_b58),
@@ -886,11 +905,11 @@ fn rebuild_block(_site: &Site, e: &Entry) -> String {
 git clone {repo} && cd {dir}
 git checkout {commit}
 <span class="c"># build with the RISC Zero builder image sha256:{img}, toolchain {tc}{net}</span>
-spel program-id &lt;the built .bin&gt;   <span class="c"># must equal the program id below</span>
-lez-registry verify &lt;the built .bin&gt; --expect &lt;its deployment digest&gt; --mark --program {pid}
-<span class="c">#   ↑ on a match, marks it locally verified — for you, on your machine only</span>
+lez-registry verify &lt;the built .bin&gt; --program {pid} --mark
+<span class="c">#   compares your rebuild's ImageID with the program header on chain;</span>
+<span class="c">#   on a match, marks it locally verified, for you, on your machine only</span>
 
-<span class="c"># expected program id</span>
+<span class="c"># program account</span>
 <b>{pid}</b>"#,
                 repo = esc(&cl.repository),
                 dir = esc(&dir),
@@ -1047,7 +1066,7 @@ docker run --rm --entrypoint sha256sum lez-registry-explorer \
   /usr/local/bin/lez-registry-explorer
 <span class="c"># expected</span>
 <b>{digest}</b></pre>
-  <p class="dim" style="margin:14px 0 0">Registered in the registry it displays? The registry keys on RISC0 ImageIDs — on-chain programs — and this explorer is a native binary, so it is honestly <em>not</em> an on-chain entry. What it can do, and does here, is practise the same source-verification discipline it exposes: a named source, a pinned toolchain, a sealed offline build, and a published digest anyone can reproduce. The registry's own program does the on-chain version of exactly this — see <a href="{reg_entry}">its self-attested entry</a>, slot 0, the registry registered in itself.</p>
+  <p class="dim" style="margin:14px 0 0">Registered in the registry it displays? The registry keys on program accounts (on-chain programs), and this explorer is a native binary, so it is honestly <em>not</em> an on-chain entry. What it can do, and does here, is practise the same source-verification discipline it exposes: a named source, a pinned toolchain, a sealed offline build, and a published digest anyone can reproduce. The registry's own program does the on-chain version of exactly this — see <a href="{reg_entry}">its self-attested entry</a>, slot 0, the registry registered in itself.</p>
 </div></section>"#,
         repo = esc(site.repo),
         commit = esc(site.commit),
@@ -1240,18 +1259,17 @@ pub fn register_page(site: &Site) -> String {
   <div class="principle">
     <span class="pn">02</span>
     <h3>Register.</h3>
-    <p>Name, version, description and the IDL content id. The registration time is read from the sequencer's clock account — nobody, you included, can choose it. The address is derived from your program id, so the entry cannot be put anywhere else.</p>
+    <p>Name, version, description and the IDL content id. The registration time is read from the sequencer's clock account — nobody, you included, can choose it. The address is derived from your program account, so the entry cannot be put anywhere else. A deployer entry is signed with the program's own header key, the one the loader made you sign the deploy with.</p>
     <pre class="code">git clone https://github.com/edenbd1/lp-0023-program-registry && cd lp-0023-program-registry
 cargo build --release --manifest-path cli/Cargo.toml
-cli/target/release/lez-registry entry-address &lt;YOUR_PROGRAM_ID&gt;
-<span class="c"># then register through spel against this registry:</span>
-<span class="c">#   registry program id {reg}</span></pre>
+cli/target/release/lez-registry register &lt;YOUR_PROGRAM&gt; --name N --version V \
+    --idl z… --key header.key --payer payer.key --registry {reg}</pre>
   </div>
   <div class="principle">
     <span class="pn">03</span>
     <h3>Prove your source. Optional, and the part that counts.</h3>
     <p>Record the repository, commit and build configuration that reproduce your bytecode. Anyone can rebuild it; a match earns <span class="badge v-verified">Verified</span>, and anyone whose own rebuild matches can mark it locally verified for themselves.</p>
-    <pre class="code">cli/target/release/lez-registry verify &lt;rebuilt.bin&gt; --expect &lt;DEPLOYMENT_DIGEST&gt; --mark --program &lt;YOUR_PROGRAM_ID&gt;</pre>
+    <pre class="code">cli/target/release/lez-registry verify &lt;rebuilt.bin&gt; --program &lt;YOUR_PROGRAM&gt; --mark</pre>
   </div>
   <div class="principle">
     <span class="pn">04</span>
