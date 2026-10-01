@@ -53,7 +53,11 @@ jobs:
 
       - name: Shell scripts parse
         run: |
-          for s in scripts/*.sh scripts/sealed/docker; do bash -n "$s" || exit 1; done
+          for s in scripts/*.sh scripts/sealed/docker; do
+            bash -n "$s" || exit 1
+            # demo.sh and CI run them directly, so the mode bit is part of the script.
+            [ "$(git ls-files -s "$s" | cut -c1-6)" = 100755 ] || { echo "::error::$s is not executable in git"; exit 1; }
+          done
 
   # The full lifecycle against a real LEZ v0.3.0 sequencer in standalone mode,
   # RISC0_DEV_MODE=0: deploy, register in itself, the refused deployer entry,
