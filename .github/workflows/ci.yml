@@ -66,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y clang pkg-config libssl-dev protobuf-compiler cmake
+        run: sudo apt-get update && sudo apt-get install -y clang pkg-config libssl-dev protobuf-compiler cmake libpcsclite-dev
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - name: RISC0 toolchain
