@@ -1,0 +1,355 @@
+
+== 1. a local LEZ v0.3.0 sequencer, standalone, RISC0_DEV_MODE=0
+sequencer sequencer_service 0.1.0 on http://127.0.0.1:3150, pid 3556
+LEZ checkout: v0.3.0 (db66590ab821a4e142c211017a3866d007f6fa77)
+✅All looks good!
+Imported public account Public/CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r
+Imported public account Public/6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+Imported public account Public/2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+Imported public account Public/7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+fee payer  CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r  balance 10000000000000
+attester   2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+stranger   38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v
+
+== 2. deploy the registry guest
+building the guest natively (tools/guest-native)
+ImageID 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+artifact /var/folders/13/gjvsmjjx0slggwgptr2d6fhh0000gn/T/tmp.RJAhJYuCjB/lez_registry.bin
+ImageID  0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+Program deployed. Header account id: 6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+image id  0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+header    mutable: the deployer may repoint it; re-check after any update
+registry program account: 6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+
+== 3. initialise, and register the registry in itself (deployer entry)
+submitting initialize (1 inputs, 0 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx b4ae8b4558926de57c9a99cc0db658ced5aaa0118304caa5d0db5a74ac29e4ef  included in block 79  fee 138816
+initialized: global CNhLEs1h2PNuzBJKA6VrjbsKZKcBPiUqvYPVqNhvvQNh  entries 0
+deployer entry for 6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2 at H2wCwUSK9Zjue39ezE8hDgjXu9id877woohpoHyqzzuA
+  header image 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d (mutable)
+  directory slot 0, stamped block 79 (1790817005639 ms)
+submitting register (5 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx c9a20bbdc1614a28e8fec6fd1567d96cc252da392ba13df950d921eecc558bd9  included in block 80  fee 729368
+registered:
+provenance 0.3.0
+  program      6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  publisher    deployer (signed by the program's header account)
+  author       6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  image id     0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  (header mutable)
+  description  The LEZ program registry, registered in itself
+  tags         registry, verified-builds
+  idl          none
+  verification claimed
+  source       https://github.com/edenbd1/lp-0023-program-registry @ e91036638ea079f1ba9da45f249b7cf5889b9d25
+  build        rustc 1.97.0-dev (rzup, risc0-build 3.0.5) (network disabled)
+  registered   block 79 (1790817005639 ms)
+
+== 4. rebuild from source with the network denied, verify locally, attest on chain
+rebuilding in a fresh target directory, network denied by sandbox-exec
+ImageID 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+rebuilt  0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+on chain 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  (mutable header)
+match: your rebuild is the program running at 6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  necessary, not sufficient: a build that fetched the answer over the network
+  would match too. Rebuild with the network disabled (scripts/build-sealed.sh).
+  marked locally verified, for you only, in /var/folders/13/gjvsmjjx0slggwgptr2d6fhh0000gn/T/tmp.RJAhJYuCjB/locally-verified.tsv
+/var/folders/13/gjvsmjjx0slggwgptr2d6fhh0000gn/T/tmp.RJAhJYuCjB/locally-verified.tsv
+  50cb6d0e1c8daf862eb067173c8a3eedd2f8ebdb57b23c4d0ed068cd34b80a39  image 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  unix 1790817112
+rebuilt image  0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d
+header image   0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  (match)
+submitting record_rebuild (3 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 1d528bcbfc6d3a472db2f835f56e3772b5bd7dc689e7bea7e78dcd4d887191d6  included in block 133  fee 426200
+recorded:
+provenance 0.3.0
+  program      6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  publisher    deployer (signed by the program's header account)
+  author       6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  image id     0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  (header mutable)
+  description  The LEZ program registry, registered in itself
+  tags         registry, verified-builds
+  idl          none
+  verification verified
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/edenbd1/lp-0023-program-registry @ e91036638ea079f1ba9da45f249b7cf5889b9d25
+  build        rustc 1.97.0-dev (rzup, risc0-build 3.0.5) (network disabled)
+  registered   block 79 (1790817005639 ms)
+  last checked block 132 (1790817111677 ms)
+
+== 5. a second program: deployer vs third party, refusals, update, mismatch
+Program deployed. Header account id: 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+image id  912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab
+header    immutable: can never be repointed, so a match cannot go stale
+-- a stranger tries to publish the DEPLOYER entry for a program they did not deploy
+refused: a deployer entry must be signed by the program's own header account.
+  --key controls 38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v, the program is 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc.
+  --submit-anyway: sending it so the chain's refusal is on record.
+deployer entry for 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc at Ab2799ri9iASoDYfDzMMuajNpAcw24eS5GGvQ76YV9vJ
+  header image 912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab (immutable)
+  directory slot 1, stamped block 223 (1790817293667 ms)
+submitting register (5 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 21d2e80fb73c85a5bf5fcc241d8ce60ebc5c071e503d799354a86a507cbd9854  included in block 224  fee 8006304
+REVERTED: no entry was written
+  the transaction was included and charged, and the chain kept nothing of it.
+sequencer: E9010 a deployer entry must be signed by the program's own header account
+derived  Ab2799ri9iASoDYfDzMMuajNpAcw24eS5GGvQ76YV9vJ
+nothing is registered at that address
+-- the deployer, signing with the program's header key
+deployer entry for 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc at Ab2799ri9iASoDYfDzMMuajNpAcw24eS5GGvQ76YV9vJ
+  header image 912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab (immutable)
+  directory slot 1, stamped block 224 (1790817295671 ms)
+submitting register (5 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 6e8fc1b1160684384b9d07f5c37db0a909a73b8d40df9e973a6ac52cf3b7d08d  included in block 225  fee 722960
+registered:
+example-token 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    deployer (signed by the program's header account)
+  author       2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  LEZ's token program, deployed again at a header the demo controls
+  tags         token
+  idl          none
+  verification claimed
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 224 (1790817295671 ms)
+-- an attester rebuilds it; the claimed build had the network up, so the match counts for nothing
+rebuilt image  912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab
+header image   912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (match)
+submitting record_rebuild (3 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 89a7ef98cb0d963ff9943e1ab54c45165ae74154e5447f3f486976256ab90857  included in block 226  fee 423496
+recorded:
+example-token 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    deployer (signed by the program's header account)
+  author       2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  LEZ's token program, deployed again at a header the demo controls
+  tags         token
+  idl          none
+  verification unreproducible
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 224 (1790817295671 ms)
+  last checked block 225 (1790817297673 ms)
+-- the stranger publishes their own third-party entry instead: allowed, and told apart
+third-party entry for 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc at FX1xxddHyCEJwDJ3JemjP7ritgANPTnpHL9gPCkvMoeP
+  header image 912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab (immutable)
+  directory slot 2, stamped block 226 (1790817299672 ms)
+submitting register (5 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 9866db3d8c7b9519221bdfe58b5723ab35d6f755dfb881146cf4b3536a08cdd8  included in block 227  fee 730096
+registered:
+token (community notes) 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    third party
+  author       38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  A third party's entry about the same program
+  idl          none
+  verification unclaimed
+  registered   block 226 (1790817299672 ms)
+-- the stranger tries to update the deployer's entry
+note: the recorded author is 2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc; the chain will refuse this signer
+submitting update (2 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 8d0733706d8ebb98ed4125000e39b2d83577cd2bf5b29298dd2b6f326f59d383  included in block 228  fee 8004200
+REVERTED: the entry is unchanged
+  the transaction was included and charged, and the chain kept nothing of it.
+sequencer: E9003 signer is not this entry's author
+-- the author updates version, description and the IDL pointer (a Logos Storage content id)
+submitting update (2 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 5dc62af3fb0c499670bd15dc7c087d311f2d56e446ffe24dc88a1b04ee030084  included in block 229  fee 448464
+updated:
+example-token 0.3.1
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    deployer (signed by the program's header account)
+  author       2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  Token program, with its IDL on Logos Storage
+  tags         token
+  idl          zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ
+  verification unreproducible
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 224 (1790817295671 ms)
+  last checked block 225 (1790817297673 ms)
+-- a source claim on the third-party entry that does not rebuild: recorded as Mismatched
+submitting claim_source (2 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 02627a735d08481d5340022508329c37e877334d96be3185b74fd87cda87f49a  included in block 230  fee 365736
+claimed:
+token (community notes) 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    third party
+  author       38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  A third party's entry about the same program
+  idl          none
+  verification claimed
+  source       https://example.invalid/not-the-token @ 0000000000000000000000000000000000000001
+  build        risc0-guest-builder r0.1.91.1 (network disabled)
+  registered   block 226 (1790817299672 ms)
+rebuilt image  468de8a65062a18a4c203c95d23a7846b860b73363741f3f5cdb62e14b4c4252
+header image   912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (DIFFERENT)
+submitting record_rebuild (3 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 63bec710092fce7d877ea947b702ed663a2fe3411523704ab26f7cdbf662853d  included in block 231  fee 457512
+recorded:
+token (community notes) 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    third party
+  author       38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  A third party's entry about the same program
+  idl          none
+  verification MISMATCHED
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://example.invalid/not-the-token @ 0000000000000000000000000000000000000001
+  build        risc0-guest-builder r0.1.91.1 (network disabled)
+  registered   block 226 (1790817299672 ms)
+  last checked block 230 (1790817307673 ms)
+
+== 6. a mutable program is repointed after its verdict: sync_header makes it Stale
+Program deployed. Header account id: 7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+deployer entry for 7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg at E1F7G35gJfBju7qnncW3BRT5LrqB8sM43nWNuvvtYxQk
+  header image 6e756540e52d4b8adb54d24db6b2f0f5656499009a98e1b4b5e55e7184da51d0 (mutable)
+  directory slot 3, stamped block 306 (1790817459665 ms)
+submitting register (5 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx bee355a13192abb3cabaaa5eb1647d437b84c2c76aa3240281b5a74c7d10fd87  included in block 307  fee 708560
+registered:
+example-ping 1.0.0
+  program      7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  publisher    deployer (signed by the program's header account)
+  author       7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  image id     6e756540e52d4b8adb54d24db6b2f0f5656499009a98e1b4b5e55e7184da51d0  (header mutable)
+  tags         demo
+  idl          none
+  verification claimed
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 306 (1790817459665 ms)
+rebuilt image  6e756540e52d4b8adb54d24db6b2f0f5656499009a98e1b4b5e55e7184da51d0
+header image   6e756540e52d4b8adb54d24db6b2f0f5656499009a98e1b4b5e55e7184da51d0  (match)
+submitting record_rebuild (3 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx e97c2d4b966f68e48de9fce0e2d6d9b88501547b013ac966140156c288e8a7da  included in block 308  fee 418104
+recorded:
+example-ping 1.0.0
+  program      7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  publisher    deployer (signed by the program's header account)
+  author       7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  image id     6e756540e52d4b8adb54d24db6b2f0f5656499009a98e1b4b5e55e7184da51d0  (header mutable)
+  tags         demo
+  idl          none
+  verification unreproducible
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 306 (1790817459665 ms)
+  last checked block 307 (1790817461666 ms)
+-- the deployer repoints the header at different bytecode (wallet program-loader update)
+Program 7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg updated
+image id  a81455e675dd9ee871e3c6d588e93980fb745978482a21a5eb05f62280817d72
+header    mutable: the deployer may repoint it; re-check after any update
+submitting sync_header (2 inputs, 0 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 0bf583c98fe094bc28d4ae7bc028186cb5387b9986e1b57a450d5ca7806c9e14  included in block 384  fee 388520
+synced:
+example-ping 1.0.0
+  program      7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  publisher    deployer (signed by the program's header account)
+  author       7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  image id     a81455e675dd9ee871e3c6d588e93980fb745978482a21a5eb05f62280817d72  (header mutable)
+  tags         demo
+  idl          none
+  verification stale (header repointed since the verdict)
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 306 (1790817459665 ms)
+  last checked block 307 (1790817461666 ms)
+
+== 7. freeze, then a refused update
+submitting freeze (2 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 35aaeaa506af6691ba2988e9c5ff17b4bdb377d5a00557657e0bf02f825f28d1  included in block 385  fee 305344
+frozen: example-token 0.3.1 can never change again
+submitting update (2 inputs, 1 signer(s) + fee payer CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r)
+  tx 3613023e3245a07f87451b9f23afba7eda7c722df8c1a7ae691599eceea32f5a  included in block 386  fee 8004136
+REVERTED: the entry is unchanged
+  the transaction was included and charged, and the chain kept nothing of it.
+sequencer: E9004 entry is frozen
+
+== 8. discovery: list, search, lookup, SDK, indexer
+4 of 4 entries
+  provenance                   0.3.0     deployer   6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2 verified
+  example-token                0.3.1     deployer   2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc unreproducible
+  token (community notes)      0.3.0     3rd-party  2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc MISMATCHED
+  example-ping                 1.0.0     deployer   7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg stale (header repointed since the verdict)
+2 of 4 entries
+  example-token                0.3.1     deployer   2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc unreproducible
+  token (community notes)      0.3.0     3rd-party  2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc MISMATCHED
+derived  H2wCwUSK9Zjue39ezE8hDgjXu9id877woohpoHyqzzuA
+provenance 0.3.0
+  program      6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  publisher    deployer (signed by the program's header account)
+  author       6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2
+  image id     0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d  (header mutable)
+  description  The LEZ program registry, registered in itself
+  tags         registry, verified-builds
+  idl          none
+  verification verified
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/edenbd1/lp-0023-program-registry @ e91036638ea079f1ba9da45f249b7cf5889b9d25
+  build        rustc 1.97.0-dev (rzup, risc0-build 3.0.5) (network disabled)
+  registered   block 79 (1790817005639 ms)
+  last checked block 132 (1790817111677 ms)
+  locally verified by you (unix 1790817112): your own rebuild, not a registry claim
+derived  FX1xxddHyCEJwDJ3JemjP7ritgANPTnpHL9gPCkvMoeP
+token (community notes) 0.3.0
+  program      2KSkuqYTyWjGET1RFG68jgnQ4qjxE5tESk48gnt6JpPc
+  publisher    third party
+  author       38AEoys7f3fYDBtoBFFjVgod5yzh25gjkEpu7J765v7v
+  image id     912d412c6e82c5a5be4a6ad0749358dd85e269655940147f274d3c168c4a14ab  (header immutable)
+  description  A third party's entry about the same program
+  idl          none
+  verification MISMATCHED
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://example.invalid/not-the-token @ 0000000000000000000000000000000000000001
+  build        risc0-guest-builder r0.1.91.1 (network disabled)
+  registered   block 226 (1790817299672 ms)
+  last checked block 230 (1790817307673 ms)
+derived  E1F7G35gJfBju7qnncW3BRT5LrqB8sM43nWNuvvtYxQk
+example-ping 1.0.0
+  program      7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  publisher    deployer (signed by the program's header account)
+  author       7FtiW24vHUn5F3P9hHQMsC4WePzW3VfEc7ofSxSJ7jjg
+  image id     a81455e675dd9ee871e3c6d588e93980fb745978482a21a5eb05f62280817d72  (header mutable)
+  tags         demo
+  idl          none
+  verification stale (header repointed since the verdict)
+  attester     2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+  source       https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+  build        risc0-guest-builder r0.1.91.1 (network ENABLED)
+  registered   block 306 (1790817459665 ms)
+  last checked block 307 (1790817461666 ms)
+-- the SDK's e2e tests against this chain
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+-- the SDK's resolve example, the path a wallet takes
+entry account  Ab2799ri9iASoDYfDzMMuajNpAcw24eS5GGvQ76YV9vJ
+name           example-token 0.3.1
+description    Token program, with its IDL on Logos Storage
+idl            zDvZRwzm9Ni32iyvoy868YVrBHFz8vo3oZirrCKhFMMn9aXuinfQ
+verification   a rebuild was tried with the network up, so it proves nothing
+header         immutable: this verdict can never go stale
+attested by    2nLJdCRHMjh5bnZkD5GWyzYo4mEr34MmrJpJMA9XV9kH
+source         https://github.com/logos-blockchain/logos-execution-zone @ db66590ab821a4e142c211017a3866d007f6fa77
+
+Verified is not safe. It means the bytecode matches the source, nothing more.
+-- the self-hostable indexer
+{"registry":"6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2","endpoint":"http://127.0.0.1:3150","indexed":4,"verified":1}
+  provenance deployer verified
+-- every refusal the sequencer recorded in this run
+E9003 signer is not this entry's author
+E9004 entry is frozen
+E9010 a deployer entry must be signed by the program's own header account
+
+== done
+registry 6SPXZAgs6Ebi7R1r5nbXdhh5KQSp9vrNDpQvRPeFC7d2 on http://127.0.0.1:3150: 4 of 4 entries
+ok: every step above was read back from the chain
+EXIT 0
