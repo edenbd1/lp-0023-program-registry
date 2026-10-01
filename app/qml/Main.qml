@@ -64,6 +64,7 @@ Item {
         if (state === "mismatched")     return bad
         if (state === "unreproducible") return bad
         if (state === "claimed")        return caution
+        if (state === "stale")          return caution
         return muted
     }
 
@@ -74,6 +75,7 @@ Item {
         if (state === "unreproducible") return "unreproducible"
         if (state === "claimed")        return "claimed"
         if (state === "unclaimed")      return "no source"
+        if (state === "stale")          return "stale"
         return state
     }
 
@@ -83,6 +85,7 @@ Item {
         if (state === "mismatched")         return "Mismatched — the published source does not rebuild to this"
         if (state === "unreproducible")     return "Not reproducible"
         if (state === "claimed")            return "Source claimed, not verified"
+        if (state === "stale")              return "Stale — the program was redeployed since the verdict"
         return "No source claimed"
     }
 
@@ -101,6 +104,9 @@ Item {
                  + "match would prove nothing about the source."
         if (state === "claimed")
             return "A source is asserted and nobody has rebuilt it. Typing a URL is not evidence."
+        if (state === "stale")
+            return "A verdict was recorded, then the program's header was repointed at different "
+                 + "bytecode. The verdict is about code that no longer runs here."
         return "Nobody has said where the source is. This is the honest default, not a failure."
     }
 
@@ -110,11 +116,12 @@ Item {
         if (state === "verified")          return 1
         if (state === "claimed")           return 2
         if (state === "unreproducible")    return 3
+        if (state === "stale")             return 3
         if (state === "mismatched")        return 4
         return 5
     }
 
-    function publisherColour(pub) { return pub === "canonical" ? accent : muted }
+    function publisherColour(pub) { return pub === "deployer" ? accent : muted }
 
     // The registration timestamp, from the sequencer's clock — the field the
     // whole adoption story rests on, so it is shown, not hidden in a block number.
@@ -241,7 +248,7 @@ Item {
                               verification, selfAttested, frozen, repository,
                               toolchain, offlineBuild, attester, account,
                               registeredBlock, registeredMillis, lastCheckedBlock,
-                              idl, commit, programId) {
+                              idl, commit, programId, imageId, headerImmutable) {
             var rec = {
                 name: name, version: version, description: description,
                 author: author, publisher: publisher, verification: verification,
@@ -250,7 +257,8 @@ Item {
                 attester: attester, account: account,
                 registeredBlock: registeredBlock, registeredMillis: registeredMillis,
                 lastCheckedBlock: lastCheckedBlock, idl: idl,
-                commit: commit, programId: programId
+                commit: commit, programId: programId,
+                imageId: imageId, headerImmutable: headerImmutable
             }
             // A walk fills the list; a single lookup opens a page. The same signal
             // serves both, told apart by which read is in flight.
@@ -332,7 +340,7 @@ Item {
                     wrapMode: Text.WordWrap
                     color: root.muted
                     font.pixelSize: 12
-                    text: "Registry " + bridge.registryId().slice(0, 16) + "… on " + bridge.endpoint()
+                    text: (bridge.registryId().length > 0 ? "Registry " + bridge.registryId().slice(0, 16) + "…" : "No registry set (PROVENANCE_REGISTRY)") + " on " + bridge.endpoint()
                         + ". Every row was walked from the chain; addresses are derived here, never looked up."
                 }
 
@@ -344,7 +352,7 @@ Item {
                     TextField {
                         id: input
                         Layout.fillWidth: true
-                        placeholderText: "filter by name or author — or paste a 64-character program id to resolve"
+                        placeholderText: "filter by name or author — or paste a program account id to resolve"
                         color: root.fg
                         font.family: "monospace"
                         font.pixelSize: 12
@@ -363,7 +371,7 @@ Item {
                         text: root.awaiting ? "Resolving…" : "Resolve id"
                         // A full program id resolves to a page; anything shorter
                         // is a filter over the list and needs no button.
-                        enabled: !root.busy && input.text.trim().length === 64
+                        enabled: !root.busy && bridge.isProgramId(input.text.trim())
                         onClicked: {
                             root.awaiting = true
                             root.busy     = true
@@ -424,7 +432,7 @@ Item {
 
                     Text {
                         color: root.muted; font.pixelSize: 11
-                        text: root.query.length > 0 && root.query.length !== 64
+                        text: root.query.length > 0 && !bridge.isProgramId(root.query)
                             ? visibleModel.count + " of " + root.allEntries.length + " shown"
                             : root.allEntries.length + " programs"
                     }

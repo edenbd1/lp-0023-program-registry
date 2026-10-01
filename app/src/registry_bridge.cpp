@@ -12,11 +12,11 @@
 
 namespace {
 
-// The registry deployed at block 17589, sealed build. Compiled in rather than
-// configured because a wrong registry id derives addresses that hold nothing,
-// which reads as "not registered" — a silent wrong answer, the worst kind.
-const char* kRegistryIdHex =
-    "f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8";
+// No registry is compiled in: the testnet v0.3 deployment is pending funding,
+// and a built-in id from a superseded chain would derive addresses that hold
+// nothing, which reads as "not registered", a silent wrong answer. The panel
+// takes it from PROVENANCE_REGISTRY or from setRegistry(), and says so when
+// neither is set.
 
 const char* kDefaultRpc = "https://testnet.lez.logos.co";
 
@@ -29,6 +29,44 @@ QByteArray fromHex32(const QString& hex) {
     if (s.size() != 64) return {};
     const QByteArray raw = QByteArray::fromHex(s.toLatin1());
     return raw.size() == 32 ? raw : QByteArray();
+}
+
+// Base58 to 32 bytes, as the wallet prints account ids (`Public/` optional).
+// Empty on a bad character or a length that is not 32 bytes.
+QByteArray fromBase58(QString s) {
+    static const QByteArray kAlphabet(
+        "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
+    s = s.trimmed();
+    if (s.startsWith(QStringLiteral("Public/"))) s = s.mid(7);
+    QList<quint8> bytes;  // little-endian accumulator
+    for (const QChar c : s) {
+        const int v = kAlphabet.indexOf(static_cast<char>(c.toLatin1()));
+        if (v < 0 || c.unicode() > 127) return {};
+        int carry = v;
+        for (auto& b : bytes) {
+            carry += b * 58;
+            b = static_cast<quint8>(carry & 0xFF);
+            carry >>= 8;
+        }
+        while (carry > 0) {
+            bytes.append(static_cast<quint8>(carry & 0xFF));
+            carry >>= 8;
+        }
+    }
+    for (const QChar c : s) {
+        if (c != QLatin1Char('1')) break;
+        bytes.append(0);
+    }
+    if (bytes.size() != 32) return {};
+    QByteArray out(32, '\0');
+    for (int i = 0; i < 32; ++i) out[i] = static_cast<char>(bytes[31 - i]);
+    return out;
+}
+
+// An account id given as base58 or as 64 hex characters.
+QByteArray fromAccount(const QString& s) {
+    const QByteArray hex = fromHex32(s);
+    return hex.isEmpty() ? fromBase58(s) : hex;
 }
 
 // Base58, matching the chain's account rendering. Leading zero bytes are
@@ -172,6 +210,7 @@ const char* stateWord(quint8 tag) {
         case 2:  return "verified";
         case 3:  return "unreproducible";
         case 4:  return "mismatched";
+        case 5:  return "stale";
         default: return "unknown";
     }
 }
@@ -180,6 +219,10 @@ const char* stateWord(quint8 tag) {
 
 RegistryBridge::RegistryBridge(QObject* parent)
     : QObject(parent), m_rpc(QString::fromLatin1(kDefaultRpc)) {
+    const QByteArray envReg = qgetenv("PROVENANCE_REGISTRY");
+    if (!envReg.isEmpty()) m_registry = fromAccount(QString::fromLatin1(envReg));
+    const QByteArray envRpc = qgetenv("LEZ_RPC");
+    if (!envRpc.isEmpty()) m_rpc = QString::fromLatin1(envRpc);
     // Qt's macOS system-proxy lookup builds a QRegularExpression, PCRE2 tries to
     // JIT-compile it, and pthread_jit_write_protect_np traps: Basecamp runs under
     // the hardened runtime without com.apple.security.cs.allow-jit, so the first
@@ -192,18 +235,35 @@ RegistryBridge::RegistryBridge(QObject* parent)
 }
 
 QString RegistryBridge::registryId() const {
-    return QString::fromLatin1(kRegistryIdHex);
+    return m_registry.isEmpty() ? QString() : base58(m_registry);
+}
+
+bool RegistryBridge::setRegistry(const QString& account) {
+    const QByteArray id = fromAccount(account);
+    if (id.isEmpty()) return false;
+    m_registry = id;
+    return true;
+}
+
+bool RegistryBridge::isProgramId(const QString& text) const {
+    return !fromAccount(text).isEmpty();
+}
+
+bool RegistryBridge::needRegistry() {
+    if (!m_registry.isEmpty()) return true;
+    emit failed(QStringLiteral(
+        "no registry set: set PROVENANCE_REGISTRY to the registry program account"));
+    return false;
 }
 
 void RegistryBridge::setEndpoint(const QString& url) {
     if (!url.trimmed().isEmpty()) m_rpc = url.trimmed();
 }
 
-QString RegistryBridge::entryAddressFor(const QString& programIdHex) const {
-    const QByteArray pid = fromHex32(programIdHex);
-    if (pid.isEmpty()) return {};
-    const QByteArray registry = fromHex32(QString::fromLatin1(kRegistryIdHex));
-    return base58(pda(registry, entrySeed(pid)));
+QString RegistryBridge::entryAddressFor(const QString& programId) const {
+    const QByteArray pid = fromAccount(programId);
+    if (pid.isEmpty() || m_registry.isEmpty()) return {};
+    return base58(pda(m_registry, entrySeed(pid)));
 }
 
 void RegistryBridge::post(const QString& accountB58,
@@ -228,8 +288,12 @@ void RegistryBridge::post(const QString& accountB58,
             then({}, false);
             return;
         }
-        const QJsonArray data =
-            result.toObject().value(QStringLiteral("data")).toArray();
+        // LEZ v0.3: an account holds one shard per program, keyed by the
+        // program's account id. The registry's data is its own shard.
+        const QJsonArray data = result.toObject()
+                                    .value(QStringLiteral("data")).toObject()
+                                    .value(QStringLiteral("shards")).toObject()
+                                    .value(base58(m_registry)).toArray();
         QByteArray raw;
         raw.reserve(data.size());
         for (const auto& v : data) {
@@ -240,31 +304,34 @@ void RegistryBridge::post(const QString& accountB58,
 }
 
 void RegistryBridge::refreshCounters() {
-    const QByteArray registry = fromHex32(QString::fromLatin1(kRegistryIdHex));
-    const QString addr = base58(pda(registry, globalSeed()));
+    if (!needRegistry()) return;
+    const QString addr = base58(pda(m_registry, globalSeed()));
     post(addr, [this](const QByteArray& raw, bool present) {
         if (!present) {
             emit failed(QStringLiteral("registry global state is empty"));
             return;
         }
         Reader r{raw};
-        const quint64 total    = r.u64();
-        const quint64 verified = r.u64();
+        const quint64 total = r.u64();
         if (!r.ok) {
-            emit failed(QStringLiteral("global state is shorter than 16 bytes"));
+            emit failed(QStringLiteral("global state is shorter than 8 bytes"));
             return;
         }
-        emit countersUpdated(QString::number(total), QString::number(verified));
+        // On v0.3 the global account keeps only the directory counter; the
+        // verified count is the walk's, reported when a walk finishes.
+        emit countersUpdated(QString::number(total), QStringLiteral("—"));
     });
 }
 
 void RegistryBridge::emitEntry(const QByteArray& payload, const QString& addr) {
     Reader r{payload};
-    // program_id: the program's RISC0 ImageID — its identity on a
-    // content-addressed chain, and the seed every entry address is derived from.
-    // Surfaced (as hex) so the detail view can show what the account was derived
-    // from rather than only the account itself.
-    const QString programId = QString::fromLatin1(r.bytes(32).toHex());
+    // program_id: the program's header account on LEZ v0.3, what calls dispatch
+    // to and the seed every entry address is derived from.
+    const QString programId = base58(r.bytes(32));
+    // image_id and header_immutable: the header as the registry checked it on
+    // chain. A mutable header can be repointed after a verdict.
+    const QString imageId = QString::fromLatin1(r.bytes(32).toHex());
+    const bool headerImmutable = r.u8() == 1;
     // registered_at: Stamp { block: u64, millis: u64 }, read from the
     // sequencer's clock at registration rather than supplied by the
     // registrant.
@@ -323,22 +390,24 @@ void RegistryBridge::emitEntry(const QByteArray& payload, const QString& addr) {
     const bool selfAttested = verified && !attester.isEmpty() && attester == author;
 
     emit entryFound(name, version, desc, author,
-            pubTag == 0 ? QStringLiteral("canonical")
+            pubTag == 0 ? QStringLiteral("deployer")
                     : QStringLiteral("third party"),
             QString::fromLatin1(stateWord(stateTag)), selfAttested,
                     frozen, repository, toolchain, offline, attester, addr,
                     QString::number(regBlock), QString::number(regMillis),
-                    QString::number(checkedBlock), idl, commit, programId);
+                    QString::number(checkedBlock), idl, commit, programId,
+                    imageId, headerImmutable);
+    if (verified) ++m_walkVerified;
 }
 
-void RegistryBridge::lookup(const QString& programIdHex) {
-    const QByteArray pid = fromHex32(programIdHex);
+void RegistryBridge::lookup(const QString& programId) {
+    if (!needRegistry()) return;
+    const QByteArray pid = fromAccount(programId);
     if (pid.isEmpty()) {
-        emit failed(QStringLiteral("a program id is 64 hex characters"));
+        emit failed(QStringLiteral("a program id is an account id: base58, or 64 hex characters"));
         return;
     }
-    const QByteArray registry = fromHex32(QString::fromLatin1(kRegistryIdHex));
-    const QString addr = base58(pda(registry, entrySeed(pid)));
+    const QString addr = base58(pda(m_registry, entrySeed(pid)));
 
     post(addr, [this, addr](const QByteArray& raw, bool present) {
         if (!present) {
@@ -348,14 +417,8 @@ void RegistryBridge::lookup(const QString& programIdHex) {
             emit entryMissing(addr);
             return;
         }
-        Reader outer{raw};
-        const quint32 payloadLen = outer.u32();
-        const QByteArray payload = outer.bytes(static_cast<int>(payloadLen));
-        if (!outer.ok) {
-            emit failed(QStringLiteral("entry account is truncated"));
-            return;
-        }
-        emitEntry(payload, addr);
+        // v0.3 stores the Entry as plain borsh in the registry's shard.
+        emitEntry(raw, addr);
     });
 }
 
@@ -363,12 +426,13 @@ void RegistryBridge::lookup(const QString& programIdHex) {
 // need a nested event loop, which is what freezes the host.
 void RegistryBridge::walkFrom(quint64 n, quint64 total, int found) {
     if (n >= total) {
+        emit countersUpdated(QString::number(total), QString::number(m_walkVerified));
         emit walkDone(found);
         return;
     }
     emit walkProgress(static_cast<int>(n), static_cast<int>(total));
 
-    const QByteArray registry = fromHex32(QString::fromLatin1(kRegistryIdHex));
+    const QByteArray registry = m_registry;
     post(base58(pda(registry, seqSeed(n))),
          [this, n, total, found, registry](const QByteArray& raw, bool present) {
              if (!present) {
@@ -388,12 +452,7 @@ void RegistryBridge::walkFrom(quint64 n, quint64 total, int found) {
              // deriving would silently drop it from the listing.
              const QString addr = base58(pda(registry, seed));
              post(addr, [this, n, total, found, addr](const QByteArray& raw2, bool present2) {
-                 if (present2) {
-                     Reader outer{raw2};
-                     const quint32 len = outer.u32();
-                     const QByteArray payload = outer.bytes(static_cast<int>(len));
-                     if (outer.ok) emitEntry(payload, addr);
-                 }
+                 if (present2) emitEntry(raw2, addr);
                  // One unreadable slot must not end the walk.
                  walkFrom(n + 1, total, present2 ? found + 1 : found);
              });
@@ -401,20 +460,20 @@ void RegistryBridge::walkFrom(quint64 n, quint64 total, int found) {
 }
 
 void RegistryBridge::listEntries() {
-    const QByteArray registry = fromHex32(QString::fromLatin1(kRegistryIdHex));
-    post(base58(pda(registry, globalSeed())), [this](const QByteArray& raw, bool present) {
+    if (!needRegistry()) return;
+    post(base58(pda(m_registry, globalSeed())), [this](const QByteArray& raw, bool present) {
         if (!present) {
             emit failed(QStringLiteral("the registry is not initialized"));
             return;
         }
         Reader r{raw};
         const quint64 total = r.u64();
-        const quint64 verified = r.u64();
         if (!r.ok) {
-            emit failed(QStringLiteral("global state is shorter than 16 bytes"));
+            emit failed(QStringLiteral("global state is shorter than 8 bytes"));
             return;
         }
-        emit countersUpdated(QString::number(total), QString::number(verified));
+        emit countersUpdated(QString::number(total), QStringLiteral("…"));
+        m_walkVerified = 0;
         walkFrom(0, total, 0);
     });
 }

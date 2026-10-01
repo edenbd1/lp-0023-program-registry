@@ -29,7 +29,7 @@ public:
     /// Derive this program's entry address and read it. Answered by
     /// `entryFound`, `entryMissing` or `failed` — never by leaving the panel
     /// showing the previous program's answer.
-    Q_INVOKABLE void lookup(const QString& programIdHex);
+    Q_INVOKABLE void lookup(const QString& programId);
 
     /// Read the registry's counters.
     Q_INVOKABLE void refreshCounters();
@@ -44,7 +44,14 @@ public:
 
     /// Show the address without reading it, so the derivation is visible even
     /// when the network is not.
-    Q_INVOKABLE QString entryAddressFor(const QString& programIdHex) const;
+    Q_INVOKABLE QString entryAddressFor(const QString& programId) const;
+
+    /// Whether `text` is an account id (base58, or 64 hex characters).
+    Q_INVOKABLE bool isProgramId(const QString& text) const;
+
+    /// The registry program account to read, base58 or hex. Defaults to
+    /// PROVENANCE_REGISTRY; false if `account` is not an account id.
+    Q_INVOKABLE bool setRegistry(const QString& account);
 
     Q_INVOKABLE void    setEndpoint(const QString& url);
     Q_INVOKABLE QString endpoint() const { return m_rpc; }
@@ -63,7 +70,8 @@ signals:
                     const QString& attester, const QString& account,
                     const QString& registeredBlock, const QString& registeredMillis,
                     const QString& lastCheckedBlock, const QString& idl,
-                    const QString& commit, const QString& programId);
+                    const QString& commit, const QString& programId,
+                    const QString& imageId, bool headerImmutable);
     void entryMissing(const QString& account);
     void countersUpdated(const QString& total, const QString& verified);
     void walkProgress(int done, int total);
@@ -75,7 +83,10 @@ private:
               const std::function<void(const QByteArray&, bool)>& then);
     void walkFrom(quint64 n, quint64 total, int found);
     void emitEntry(const QByteArray& payload, const QString& account);
+    bool needRegistry();
 
     QNetworkAccessManager m_net;
     QString m_rpc;
+    QByteArray m_registry;
+    quint64 m_walkVerified = 0;
 };
