@@ -18,6 +18,16 @@ different claims and painting both green hides the difference that matters most.
 `Unreproducible` says why: the claimed build had network access, so a match
 would prove nothing about the source.
 
+## Which registry, which chain
+
+LEZ v0.3: the panel reads the registry program's shard of each account
+(`getAccount` → `data.shards[<registry>]`), and a program id is its header
+account, typed as base58 or as 64 hex characters. The registry is taken from
+`PROVENANCE_REGISTRY` and the sequencer from `LEZ_RPC` (default
+`https://testnet.lez.logos.co`); nothing is compiled in, because the testnet
+v0.3 deployment is pending funding and a built-in id from an older chain would
+resolve every program to "not registered".
+
 ## Build
 
 ```bash

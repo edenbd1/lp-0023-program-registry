@@ -85,7 +85,7 @@ Item {
         if (state === "mismatched")         return "Mismatched — the published source does not rebuild to this"
         if (state === "unreproducible")     return "Not reproducible"
         if (state === "claimed")            return "Source claimed, not verified"
-        if (state === "stale")              return "Stale — the program was redeployed since the verdict"
+        if (state === "stale")              return "Stale: the program was redeployed since the verdict"
         return "No source claimed"
     }
 
