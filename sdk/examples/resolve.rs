@@ -12,7 +12,9 @@
 //!
 //! Both are account ids in base58, as the LEZ wallet prints them.
 
-use lez_registry_sdk::{base58, entry_address, hex, parse_account, Client, VerificationState};
+use lez_registry_sdk::{
+    base58, content_id_string, entry_address, hex, parse_account, Client, VerificationState,
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,7 +52,7 @@ fn main() {
     match entry.idl {
         // The IDL itself lives on Logos Storage; the entry holds its identifier.
         // An unresolvable IDL is shown as unavailable; the metadata above stands.
-        Some(idl) => println!("idl            {}", hex(&idl)),
+        Some(idl) => println!("idl            {}", content_id_string(&idl)),
         None => println!("idl            unavailable"),
     }
 

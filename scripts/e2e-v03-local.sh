@@ -78,13 +78,17 @@ if [ -z "$PORT" ]; then
 fi
 [ -n "$PORT" ] || die "no free port"
 WORK="$(mktemp -d)"
+# Local-verified marks go to the work directory, not your config.
+export LEZ_REGISTRY_HOME="$WORK"
 export LEZ_RPC="http://127.0.0.1:$PORT"
 SEQ_PID=""
 IDX_PID=""
 cleanup() {
-  [ -n "$IDX_PID" ] && kill "$IDX_PID" 2>/dev/null || true
+  local status=$?
+  if [ -n "$IDX_PID" ]; then kill "$IDX_PID" 2>/dev/null || true; fi
   if [ -n "$SEQ_PID" ] && [ "$KEEP" != 1 ]; then kill "$SEQ_PID" 2>/dev/null || true; fi
-  [ "$KEEP" = 1 ] && echo "left running: sequencer pid $SEQ_PID on $LEZ_RPC, work dir $WORK"
+  if [ "$KEEP" = 1 ]; then echo "left running: sequencer pid $SEQ_PID on $LEZ_RPC, work dir $WORK"; fi
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -159,11 +163,13 @@ deploy() { # deploy <bin> <header> [--immutable]
 
 # ---------------------------------------------------------------------------
 step "2. deploy the registry guest"
-ARTIFACT="${ARTIFACT:-$ROOT/artifacts/programs/lez_registry.bin}"
-if [ ! -f "$ARTIFACT" ]; then
-  echo "no committed artifact at $ARTIFACT; building the guest natively (tools/guest-native)"
+# Built here, natively, so that step 4 can rebuild it the same way and compare.
+# The artifact for the public zone is the sealed Docker build
+# (scripts/build-sealed.sh, docs/deploy-v03.md); pass ARTIFACT to deploy that.
+if [ -z "${ARTIFACT:-}" ]; then
   ARTIFACT="$WORK/lez_registry.bin"
-  ( cd tools/guest-native && cargo run --release -q -- "$ARTIFACT" )
+  echo "building the guest natively (tools/guest-native)"
+  ( cd tools/guest-native && cargo run --release -q -- "$ARTIFACT" ) | tail -1
 fi
 echo "artifact $ARTIFACT"
 echo "ImageID  $(reg image-id "$ARTIFACT" 2>/dev/null)"
@@ -176,7 +182,9 @@ echo "registry program account: $REG"
 step "3. initialise, and register the registry in itself (deployer entry)"
 reg init --payer "$K/payer.key"
 COMMIT=$(git rev-parse HEAD)
-SOURCE_DIGEST=$(git ls-tree -r HEAD | shasum -a 256 | cut -d' ' -f1)
+# The same digest scripts/verify-source.sh prints: over the tracked guest sources.
+SOURCE_DIGEST=$(git ls-files -z src program tests Cargo.toml Cargo.lock \
+  | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
 TOOLCHAIN="$(rustc +risc0 --version 2>/dev/null | cut -d' ' -f1-2 || echo risc0) (rzup, risc0-build 3.0.5)"
 BUILDER_DIGEST=$(rustc +risc0 -vV 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
 if ! git diff --quiet HEAD -- program src Cargo.toml Cargo.lock; then
@@ -202,7 +210,7 @@ if [ "$REBUILD" = 1 ]; then
   ( cd tools/guest-native && CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$WORK/rebuild-target" \
       ${NONET[@]+"${NONET[@]}"} cargo run --release -q -- "$REBUILT" ) | tail -1
   reg verify "$REBUILT" --program "$REG" --mark
-  LEZ_REGISTRY_HOME="$WORK" reg local-verified >/dev/null
+  reg local-verified
   reg record-rebuild "$REG" --file "$REBUILT" --key "$K/attester.key" --payer "$K/payer.key"
 else
   echo "REBUILD=0: attesting the deployed artifact itself (not a rebuild)"
@@ -301,7 +309,7 @@ curl -s "http://127.0.0.1:$IDX_PORT/stats"; echo
 curl -s "http://127.0.0.1:$IDX_PORT/search?q=verified" | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(" ", e["name"], e["publisher"], e["verification"]) for e in (d["results"] if isinstance(d,dict) else d)]' || true
 
 echo "-- every refusal the sequencer recorded in this run"
-grep -o 'E90[0-9][0-9] [^"]*' "$WORK/sequencer.log" | sort | uniq -c || true
+grep -o 'E90[0-9][0-9] [^"]*' "$WORK/sequencer.log" | sort -u || true
 
 step "done"
 echo "registry $REG on $LEZ_RPC: $(reg list | head -1)"

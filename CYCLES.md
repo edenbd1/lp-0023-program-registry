@@ -41,6 +41,11 @@ The entry this sequence ends with is 500 bytes in the registry's shard.
 - Every instruction is about 1% of the ceiling or less, so the CLI's default gas
   limit of 1,000,000 leaves roughly a tenfold margin and keeps the fee reserve
   small. `PROVENANCE_GAS_LIMIT` overrides it.
+- A refused call (a guest panic, such as an update by someone who is not the
+  author) is charged its **whole gas limit**: the executor reports no cycle
+  count for a panicked session. The local run shows it, a refused update with a
+  4,000,000 limit cost 32,004,200 at a base fee of 8. Keeping the limit near the
+  real cost is what keeps a refusal cheap.
 - `plan` dominates `register` because it builds and validates the whole entry
   (and derives three PDAs) before any shard is touched; the applies only check
   and write.

@@ -77,13 +77,11 @@ lez-registry-explorer [REGISTRY_HEX] [options]
 Loopback is the default; a container opts into `--host 0.0.0.0` so its published
 port is reachable, which is exactly what the `Dockerfile` does.
 
-Defaults, from [`../DEPLOYMENTS.md`](../DEPLOYMENTS.md):
-
-| | |
-|---|---|
-| registry ProgramId | `f59751e932e856f7565f34e79ae726791794dc68e55f2413bc0375008cc07bf8` |
-| global state | `75jzaQqqqf87apGZfr3bewGbHDfCnau49TgohDKc5s1z` |
-| endpoint | `https://testnet.lez.logos.co` |
+The registry is required (`--registry <ACCOUNT>` or `PROVENANCE_REGISTRY`): the
+testnet v0.3 deployment is pending funding, so there is no default to fall back
+to (see [`../DEPLOYMENTS.md`](../DEPLOYMENTS.md)). The endpoint defaults to
+`https://testnet.lez.logos.co`. With Docker:
+`docker run --rm -p 8080:8080 -e PROVENANCE_REGISTRY=<ACCOUNT> lez-registry-explorer`.
 
 ## What it shows
 

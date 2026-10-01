@@ -155,6 +155,40 @@ fn main() {
         let a: Vec<String> = a.iter().map(u64::to_string).collect();
         println!("| `{name}` | {p} | {} | {t} |", a.join(" + "));
     }
+    // What a refused call costs: an update signed by someone who is not the
+    // author. The apply panics; the executor reports the cycles it ran.
+    let stranger = [0x99u8; 32];
+    let refused = sdk::build_update(&registry, &key, &stranger, "9.9.9", "", "").unwrap();
+    let signers = refused.signer_ids();
+    let input = PlanInput {
+        self_account_id: AccountId::new(registry),
+        caller_account_id: None,
+        accounts: refused
+            .accounts
+            .iter()
+            .map(|a| AccountMeta::new(AccountId::new(a.selector.account), signers.contains(&a.selector.account), AccountId::new(a.selector.program)))
+            .collect(),
+        instruction_data: refused.instruction_data.clone(),
+    };
+    let (out, plan_c) = run(&elf, CallKind::Plan, &borsh::to_vec(&input).unwrap());
+    let GuestOutput::Plan(plan) = out else { panic!() };
+    let effect = plan.effects.into_iter().next().unwrap();
+    let pre = shards.get(&(sdk::entry_address(&registry, &program), registry)).cloned().unwrap();
+    let ai = ApplyInput {
+        self_account_id: AccountId::new(registry),
+        selector: ProgramShardSelector::new(effect.selector.account_id, effect.selector.program_account_id),
+        pre_data: pre.try_into().unwrap(),
+        effect_data: effect.data,
+    };
+    let mut b = ExecutorEnv::builder();
+    b.write_slice(&to_borsh_frame(&CallKind::Apply));
+    b.write_slice(&to_frame(&borsh::to_vec(&ai).unwrap()));
+    b.session_limit(Some(10_000_000));
+    match default_executor().execute(b.build().unwrap(), &elf) {
+        Ok(info) => println!("\nrefused update: plan {plan_c}, apply exited {:?} after {} cycles", info.exit_code, info.cycles()),
+        Err(e) => println!("\nrefused update (frozen entry): plan {plan_c} cycles, then the apply panics: {}. The executor reports no cycle count for a panicked session, and the sequencer charges such a call its whole gas limit.", e.root_cause()),
+    }
+
     let entry = shards.get(&(sdk::entry_address(&registry, &program), registry)).expect("an entry was written");
     let e: core_::Entry = borsh::from_slice(entry).unwrap();
     println!("\nfinal entry: {} {} {:?} frozen={}, {} bytes on chain", e.name, e.version, e.verification.state, e.frozen, entry.len());

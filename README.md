@@ -125,7 +125,9 @@ Keys are files holding a 32-byte secret in hex, the form
 in the LEZ wallet and here (`lez-registry keygen --out FILE` makes one). The fee
 payer must hold LGO. On v0.3 a failed call is charged and reverted rather than
 rejected, so after every write the CLI reads the chain back and prints
-`REVERTED` when nothing changed.
+`REVERTED` when nothing changed. A refused call is charged its whole gas limit
+(a panicked guest reports no cycle count), which is why the CLI's default limit
+is 1,000,000, about ten times a `register`; `PROVENANCE_GAS_LIMIT` overrides it.
 
 ## SDK: resolve a program id to metadata and IDL
 

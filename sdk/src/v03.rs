@@ -1,9 +1,9 @@
-//! Reading a program on LEZ 0.3, where a program is an account.
+//! Reading a program on LEZ v0.3, where a program is an account.
 //!
 //! On LEZ v0.3 a deployed program lives at a *header account* the
 //! deployer chose and signed for. The header sits in that account's
 //! `program_loader` shard and records the `image_id` the runtime recomputed from
-//! the bytecode segments — never a caller-supplied value — plus whether the
+//! the bytecode segments, never a caller-supplied value, plus whether the
 //! header is frozen. So the check a verifier needs, "does my rebuild produce the
 //! bytecode running at this program id?", is one account read on 0.3:
 //! [`Client::program_header`], then [`ProgramHeader::matches`].
@@ -22,8 +22,7 @@ pub const PROGRAM_LOADER: AccountId = [0xFE; 32];
 /// `{ image_id: [u32; 8], program_first_segment: AccountId, immutable: bool }`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProgramHeader {
-    /// The ImageID as bytes — the same 32 bytes `spel program-id` prints as
-    /// "ImageID (hex bytes)".
+    /// The ImageID as bytes: the 32 bytes `lez-registry image-id` prints.
     pub image_id: [u8; 32],
     pub first_segment: AccountId,
     /// Once true the header can never be updated again, so a verification of
@@ -96,14 +95,15 @@ impl Client {
 mod tests {
     use super::*;
 
-    /// A header read from a local v0.3.0-rc1 standalone sequencer after
-    /// deploying `ping_receiver.bin`, whose `spel program-id` prints
-    /// ImageID (hex bytes) 9956be7d0f541db26627fa077e369f7a103cc0735d673fb25b698881894e5cea.
+    /// The registry's own header, read from a local v0.3.0 standalone
+    /// sequencer after `wallet program-loader deploy` (the e2e run in
+    /// `evidence/e2e-v03-local.txt`); `lez-registry image-id` prints
+    /// 0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d for that binary.
     const LOADER_SHARD: [u8; 65] = [
-        153, 86, 190, 125, 15, 84, 29, 178, 102, 39, 250, 7, 126, 54, 159, 122, 16, 60, 192, 115,
-        93, 103, 63, 178, 91, 105, 136, 129, 137, 78, 92, 234, 30, 32, 252, 228, 24, 232, 194, 217,
-        146, 101, 169, 155, 246, 82, 182, 105, 130, 25, 231, 247, 148, 187, 160, 30, 222, 203, 11,
-        0, 68, 180, 85, 197, 0,
+        14, 63, 233, 116, 225, 132, 228, 0, 98, 129, 31, 40, 196, 216, 193, 125, 242, 8, 191, 128,
+        238, 12, 231, 238, 9, 20, 138, 160, 248, 223, 165, 61, 229, 174, 242, 14, 1, 20, 124, 37,
+        122, 142, 197, 208, 45, 70, 202, 15, 71, 173, 45, 78, 168, 195, 50, 53, 37, 205, 231, 202,
+        250, 124, 112, 50, 0,
     ];
 
     fn hexbytes(s: &str) -> [u8; 32] {
@@ -119,7 +119,7 @@ mod tests {
         let h = ProgramHeader::decode(&LOADER_SHARD).expect("a real header");
         assert!(!h.immutable);
         assert!(h.matches(&hexbytes(
-            "9956be7d0f541db26627fa077e369f7a103cc0735d673fb25b698881894e5cea"
+            "0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d"
         )));
         let mut other = h.image_id;
         other[0] ^= 1;
@@ -148,25 +148,5 @@ mod tests {
             Some(&LOADER_SHARD[..])
         );
         assert_eq!(shard(&json, &[7u8; 32]), None);
-    }
-
-    /// Against a live 0.3 zone: `LEZ_V03_ENDPOINT` and `LEZ_V03_PROGRAM` (b58).
-    #[test]
-    #[ignore = "needs a LEZ 0.3 sequencer"]
-    fn a_live_header_reads_back() {
-        // Opt-in: the public zone is still v0.2.4, so the e2e job that runs
-        // every ignored test has no 0.3 sequencer to point this at. It runs
-        // only when both variables name one, and says so when it does not.
-        let (Ok(ep), Ok(prog)) = (
-            std::env::var("LEZ_V03_ENDPOINT"),
-            std::env::var("LEZ_V03_PROGRAM"),
-        ) else {
-            eprintln!("skipped: set LEZ_V03_ENDPOINT and LEZ_V03_PROGRAM to a 0.3 zone and a deployed program");
-            return;
-        };
-        let pid = crate::from_base58(&prog).expect("a base58 account id");
-        let c = Client::new(ep, [0u8; 32]);
-        let h = c.program_header(&pid).expect("answered").expect("a header");
-        println!("image_id {:02x?} immutable {}", h.image_id, h.immutable);
     }
 }

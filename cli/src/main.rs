@@ -342,7 +342,7 @@ fn print_entry(e: &core_::Entry) {
         println!("  tags         {}", e.tags.join(", "));
     }
     match &e.idl {
-        Some(id) => println!("  idl          {}", encode_content_id(id)),
+        Some(id) => println!("  idl          {}", sdk::content_id_string(id)),
         None => println!("  idl          none"),
     }
     println!("  verification {}", state_line(e));
@@ -367,28 +367,6 @@ fn print_entry(e: &core_::Entry) {
     if e.frozen {
         println!("  frozen       yes: metadata can never change again");
     }
-}
-
-/// Multibase base58btc, the form a Logos Storage node accepts.
-fn encode_content_id(id: &core_::ContentId) -> String {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut digits: Vec<u8> = Vec::new();
-    for &byte in id {
-        let mut carry = u32::from(byte);
-        for d in &mut digits {
-            carry += u32::from(*d) << 8;
-            *d = (carry % 58) as u8;
-            carry /= 58;
-        }
-        while carry > 0 {
-            digits.push((carry % 58) as u8);
-            carry /= 58;
-        }
-    }
-    let mut s = String::from("z");
-    s.extend(std::iter::repeat_n('1', id.iter().take_while(|b| **b == 0).count()));
-    s.extend(digits.iter().rev().map(|d| ALPHABET[*d as usize] as char));
-    s
 }
 
 fn lookup_cmd(args: &[String]) -> Result<ExitCode, String> {
