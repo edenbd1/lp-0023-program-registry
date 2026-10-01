@@ -45,7 +45,7 @@ testnet v0.3 deployment is **pending funding** ([deploy-v03.md](deploy-v03.md)).
 |---|---|---|
 | Deployed and tested on testnet 0.3 | **open** | pending funding |
 | Builds and runs end to end on macOS (Apple Silicon) and Linux (x86_64) | **partial** | run end to end on macOS; the Linux path is the CI e2e job, not yet run on this branch |
-| Logos Core module built with `logos-module-builder` (`mkLogosModule`) | **partial** | `app/` builds with CMake against Qt 6.9.2; the `mkLogosModule` path is not yet done |
+| Logos Core module built with `logos-module-builder` (`mkLogosModule`) | **met** | `app/flake.nix` is `mkLogosModule` on the builder revision the Basecamp 0.3.0 catalog uses (Qt 6.9.2); CI's "Basecamp module" job builds `./app#lgx-portable` on `macos-14` and `ubuntu-24.04` and merges both variants into one `.lgx` |
 | IDL for the registry; the registry registered in itself | **partial** | registered in itself by its own header key (local); IDL hand-maintained, not SPEL-generated (see above) |
 | E2E tests against a real standalone sequencer in CI, green on the default branch | **partial** | `scripts/e2e-v03-local.sh` is the CI e2e job; not yet run on GitHub for this branch |
 | README: setup, deployed program id, CLI and module usage | **partial** | everything except the program id, which waits for the deployment |
@@ -59,3 +59,13 @@ independent authors; 20 entries with independently rebuildable source claims;
 registrations over at least two months with at least 10 a month; 20 Discord and
 20 X testimonials. The two-month window starts with the testnet v0.3
 deployment.
+
+## Submission requirements
+
+| requirement | status | evidence |
+|---|---|---|
+| Public repository, program, SDK, CLI and module dual-licensed MIT and Apache-2.0 | **partial** | `LICENSE-MIT`, `LICENSE-APACHE`; the repository is still private |
+| The registry's own IDL and the deployed program id on testnet 0.3 | **partial** | `idl/lez_registry.idl.json`; the program id waits for the deployment |
+| Module published to a catalog forked from `logos-modules-release-base`, releasing via `logos-modules-release-action`, with its `logos-repo.json` URL | **partial** | prepared, not published: [publish.md](publish.md). URL `https://raw.githubusercontent.com/edenbd1/lp-0023-provenance-catalog/main/logos-repo.json`; variants darwin-arm64 and linux-amd64; `logos-repo.json` passes the release tool's `validate-repo` |
+| Evidence for each adoption criterion | **open** | see Adoption |
+| FURPS self-assessment in the solution file | **open** | this table is its draft |

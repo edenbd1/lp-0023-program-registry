@@ -197,7 +197,11 @@ comparison of two generated files.
   registry's shard; holds no keys. The sequencer and the registry are settings
   in the panel (or `LEZ_RPC` / `PROVENANCE_REGISTRY`). Packaged for Basecamp
   0.3.0 with logos-module-builder: `nix build ./app#lgx-portable`, then
-  `scripts/install-local.sh <user-dir> result/*.lgx`.
+  `scripts/install-local.sh <user-dir> result/*.lgx`. It is published through
+  a module catalog forked from `logos-modules-release-base`, for darwin-arm64
+  and linux-amd64, at
+  `https://raw.githubusercontent.com/edenbd1/lp-0023-provenance-catalog/main/logos-repo.json`
+  (prepared, not yet published; [`docs/publish.md`](docs/publish.md)).
 - [`explorer/`](explorer/README.md): a read-only, self-hostable web explorer
   for the registry (`--registry <ACCOUNT> --endpoint <URL>`), no database, no
   CDN, no analytics.
