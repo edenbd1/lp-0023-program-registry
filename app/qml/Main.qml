@@ -55,6 +55,9 @@ Item {
     property var    allEntries: []    // every walked entry, unfiltered
     property string counterTotal:    "—"
     property string counterVerified: "—"
+    property bool   showSettings: false
+    // Bumped on save so bindings that read the bridge re-evaluate.
+    property int    settingsEpoch: 0
 
     // Verified is deliberately not one colour. A build whose only voucher is its
     // own author is not the same claim as one a third party reproduced, and
@@ -291,8 +294,10 @@ Item {
             root.busy     = false
             root.walking  = false
             root.awaiting = false
-            root.errored  = true
-            root.status   = "Failed: " + what
+            // No registry configured is a state, not a failure.
+            var notYet = what.indexOf("not deployed yet") === 0
+            root.errored  = !notYet
+            root.status   = notYet ? what : "Failed: " + what
         }
     }
 
@@ -333,6 +338,111 @@ Item {
                         text: root.counterTotal + " registered · " + root.counterVerified + " verified"
                         color: root.muted; font.pixelSize: 13
                     }
+                    Button {
+                        text: "Settings"
+                        checkable: true
+                        checked: root.showSettings
+                        onClicked: root.showSettings = !root.showSettings
+                    }
+                }
+
+                // -- settings: which sequencer, which registry --
+                Rectangle {
+                    visible: root.showSettings
+                    Layout.fillWidth: true
+                    implicitHeight: setCol.implicitHeight + 24
+                    color: root.panel
+                    border.color: root.line
+                    radius: 6
+                    ColumnLayout {
+                        id: setCol
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 8
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: root.muted
+                            font.pixelSize: 11
+                            text: "Where to read. Nothing here signs. Copy a value, then Paste: Basecamp 0.3.0 does not pass typing to this panel. "
+                                  + (bridge.envOverrides().length
+                                     ? "Set in the environment, and winning over a saved value: " + bridge.envOverrides().join(", ")
+                                     : "Saved to " + bridge.settingsFile())
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Sequencer RPC"; color: root.muted; font.pixelSize: 12; Layout.preferredWidth: 120 }
+                            TextField {
+                                id: rpcField
+                                Layout.fillWidth: true
+                                text: bridge.endpoint()
+                                placeholderText: bridge.defaultEndpoint()
+                                color: root.fg; font.family: "monospace"; font.pixelSize: 12
+                                selectByMouse: true
+                                background: Rectangle { color: root.panel2; border.color: root.line; radius: 4 }
+                            }
+                            Button { text: "Paste"; onClicked: rpcField.text = bridge.clipboardText() }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Registry program"; color: root.muted; font.pixelSize: 12; Layout.preferredWidth: 120 }
+                            TextField {
+                                id: regField
+                                Layout.fillWidth: true
+                                text: bridge.registryId()
+                                placeholderText: "empty until the v0.3 registry is deployed"
+                                color: root.fg; font.family: "monospace"; font.pixelSize: 12
+                                selectByMouse: true
+                                background: Rectangle { color: root.panel2; border.color: root.line; radius: 4 }
+                            }
+                            Button { text: "Paste"; onClicked: regField.text = bridge.clipboardText() }
+                        }
+                        RowLayout {
+                            spacing: 8
+                            Button {
+                                text: "Save and read"
+                                onClicked: {
+                                    if (!bridge.saveSettings(rpcField.text, regField.text)) {
+                                        root.status = "Not an account id: " + regField.text
+                                        return
+                                    }
+                                    root.settingsEpoch++
+                                    root.reload()
+                                }
+                            }
+                            Button {
+                                text: "Public testnet"
+                                onClicked: rpcField.text = bridge.defaultEndpoint()
+                            }
+                        }
+                    }
+                }
+
+                // -- not deployed yet: a state, not an error --
+                Rectangle {
+                    visible: root.settingsEpoch >= 0 && bridge.registryId().length === 0
+                    Layout.fillWidth: true
+                    implicitHeight: ndCol.implicitHeight + 24
+                    color: "#1d1a10"
+                    border.color: "#6b5a1e"
+                    radius: 6
+                    ColumnLayout {
+                        id: ndCol
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 4
+                        Text { text: "Not deployed yet"; color: "#e8c766"; font.pixelSize: 15; font.bold: true }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: root.fg
+                            font.pixelSize: 12
+                            text: root.settingsEpoch >= 0
+                                  ? "The v0.3 registry is not deployed on " + bridge.endpoint()
+                                    + " yet. Once it is, put its program account in Settings."
+                                  : ""
+                        }
+                    }
                 }
 
                 Text {
@@ -340,7 +450,7 @@ Item {
                     wrapMode: Text.WordWrap
                     color: root.muted
                     font.pixelSize: 12
-                    text: (bridge.registryId().length > 0 ? "Registry " + bridge.registryId().slice(0, 16) + "…" : "No registry set (PROVENANCE_REGISTRY)") + " on " + bridge.endpoint()
+                    text: (root.settingsEpoch >= 0 && bridge.registryId().length > 0 ? "Registry " + bridge.registryId().slice(0, 16) + "…" : "No registry set") + " on " + bridge.endpoint()
                         + ". Every row was walked from the chain; addresses are derived here, never looked up."
                 }
 
@@ -364,6 +474,15 @@ Item {
                             root.rebuild()
                         }
                         onAccepted: if (resolve.enabled) resolve.clicked()
+                    }
+
+                    Button {
+                        text: "Paste"
+                        onClicked: input.text = bridge.clipboardText()
+                    }
+                    Button {
+                        text: "Clear"
+                        onClicked: input.text = ""
                     }
 
                     Button {

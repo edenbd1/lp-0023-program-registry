@@ -1,22 +1,25 @@
 {
   "name": "lez_program_registry",
+  "display_name": "Provenance",
   "version": "0.3.0",
-  "description": "Provenance, the LEZ program registry (v0.3): look up a program's provenance by deriving its entry address locally and reading it from a sequencer, with no index in the path",
-  "author": "edenbd1",
   "type": "ui",
-  "main": "lez_program_registry",
-  "dependencies": [],
   "category": "developer-tools",
-  "build": {
-    "type": "cmake",
-    "files": [
-      "src/plugin.cpp",
-      "src/plugin.h",
-      "src/registry_bridge.cpp",
-      "src/registry_bridge.h",
-      "qml/Main.qml",
-      "qml/qmldir",
-      "src/metadata.json"
-    ]
+  "description": "Provenance, the LEZ program registry (v0.3): look up a program's provenance by deriving its entry address locally and reading it from a sequencer, with no index in the path. Read-only: it holds no keys and signs nothing",
+  "author": "edenbd1",
+  "main": "lez_program_registry_plugin",
+  "icon": "assets/icon.png",
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
   }
 }

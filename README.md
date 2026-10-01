@@ -194,9 +194,10 @@ comparison of two generated files.
 
 - [`app/`](app/README.md): the Logos Core / Basecamp UI module. Browses,
   filters and resolves entries by deriving addresses locally and reading the
-  registry's shard; holds no keys. Set `PROVENANCE_REGISTRY` (and `LEZ_RPC`).
-  Build with Qt 6.9.2 (`cmake -S app -B app/build ...`), package with
-  `scripts/package-lgx.py`.
+  registry's shard; holds no keys. The sequencer and the registry are settings
+  in the panel (or `LEZ_RPC` / `PROVENANCE_REGISTRY`). Packaged for Basecamp
+  0.3.0 with logos-module-builder: `nix build ./app#lgx-portable`, then
+  `scripts/install-local.sh <user-dir> result/*.lgx`.
 - [`explorer/`](explorer/README.md): a read-only, self-hostable web explorer
   for the registry (`--registry <ACCOUNT> --endpoint <URL>`), no database, no
   CDN, no analytics.

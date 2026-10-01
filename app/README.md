@@ -22,28 +22,66 @@ would prove nothing about the source.
 
 LEZ v0.3: the panel reads the registry program's shard of each account
 (`getAccount` → `data.shards[<registry>]`), and a program id is its header
-account, typed as base58 or as 64 hex characters. The registry is taken from
-`PROVENANCE_REGISTRY` and the sequencer from `LEZ_RPC` (default
-`https://testnet.lez.logos.co`); nothing is compiled in, because the testnet
-v0.3 deployment is pending funding and a built-in id from an older chain would
-resolve every program to "not registered".
+account, typed as base58 or as 64 hex characters.
+
+Both are settings: the sequencer RPC (default `https://testnet.lez.logos.co`)
+and the registry program account (empty until the v0.3 registry is deployed on
+the public testnet, and the panel says "Not deployed yet" rather than resolving
+every program to "not registered"). They are saved to
+`$LOGOS_USER_DIR/module_data/lez_program_registry/settings.ini`, so a throwaway
+`--user-dir` never touches another instance's. `LEZ_RPC` and
+`PROVENANCE_REGISTRY` override them.
+
+![Not deployed yet](../docs/screens/basecamp-not-deployed.png)
+
+## In Basecamp 0.3.0, against a local v0.3 sequencer
+
+`KEEP=1 scripts/e2e-v03-local.sh` leaves its LEZ v0.3.0 sequencer (tag
+`v0.3.0`, commit `db66590ab`, standalone) running with four entries in the
+registry. Pointed at it, the panel walks all four and shows each verdict as the
+lifecycle left it (verified, unreproducible and frozen, mismatched, stale):
+
+![Settings pointed at a local sequencer](../docs/screens/basecamp-settings-local.png)
+![The registry walked from a local sequencer](../docs/screens/basecamp-registry-local.png)
+![An entry](../docs/screens/basecamp-entry-local.png)
+
+A pasted program id resolves by derivation: the entry account the panel derives
+for the token program, `FerkbU6w…TKZrCh`, is the one the SDK's resolve example
+prints for it in the same run.
+
+![A pasted program id, resolved](../docs/screens/basecamp-lookup-local.png)
+
+**Typing does not reach the panel in Basecamp 0.3.0.** Clicks do, keys do
+not: Basecamp keeps keyboard activation on its own window, and a legacy `ui`
+widget module never receives the key events (Basecamp's own search field types
+fine). So the lookup field and both settings fields have a Paste button that
+reads the clipboard: copy a program id, click Paste, then Resolve id.
+
+To reproduce on a throwaway Basecamp instance, never your own:
+
+```bash
+nix build ./app#lgx-portable --accept-flake-config -o result
+scripts/install-local.sh /tmp/bc-provenance result/*.lgx
+~/Applications/LogosBasecamp-0.3.0.app/Contents/MacOS/LogosBasecamp --user-dir /tmp/bc-provenance
+```
 
 ## Build
 
 ```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/Qt/6.9.2/macos -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j4
-python3 ../scripts/package-lgx.py
+export PATH=/nix/var/nix/profiles/default/bin:$PATH
+nix build ./app#lgx-portable --accept-flake-config -o result   # from the repo root
 ```
 
-Qt **6.9.2** specifically. Basecamp 0.2.2 bundles that version and the bundled
-version is a *ceiling*: a plugin built against Homebrew's 6.11 is rejected at
-load. `QtConcurrent` is deliberately not linked — Basecamp does not bundle it,
-and linking it makes the plugin unloadable.
-
-Official builds reference frameworks as `@rpath/…`, which resolves against
-Basecamp's own Qt. Homebrew builds hardcode `/opt/homebrew/opt/qtbase/lib/…` and
-work nowhere but the machine that built them.
+logos-module-builder (`mkLogosModule`, see [`flake.nix`](flake.nix)), pinned to
+the revision the Basecamp 0.3.0 catalog modules are built with. Its Qt is
+6.9.2, the version Basecamp bundles, and that version is a ceiling: a plugin
+built against a newer minor is rejected at load. The dylib references Qt as
+`@rpath/…`, which resolves against Basecamp's own frameworks. The QML is
+compiled in with zlib rather than zstd, since a zstd resource needs a QtCore
+built with zstd and not every Qt 6.9.2 is. CI builds the package on
+ubuntu-24.04 (`linux-amd64`) and macos-14 (`darwin-arm64`), runs the load
+harness ([`tests/ui_plugin_load_test.cpp`](tests/ui_plugin_load_test.cpp)) on
+the packaged macOS dylib, and merges both variants into one `.lgx`.
 
 ## Load-verified, not just compiled
 
@@ -64,9 +102,9 @@ IComponent    : cast succeeded
 wrong function through a correctly cast pointer, so `src/plugin.h` mirrors it
 slot for slot rather than approximating it.
 
-The packaged manifest carries `type: "ui"`. `lgx add` leaves that field empty and
-an empty type makes the module invisible in Basecamp, so `package-lgx.py` patches
-the metadata in afterwards.
+The packaged manifest carries `type: "ui"`, written by the builder's bundler
+from `metadata.json`; an empty type would make the module invisible in Basecamp,
+and CI asserts it.
 
 ## Two things that only show up with the host actually running
 

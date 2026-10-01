@@ -19,12 +19,16 @@ QWidget* RegistryPlugin::createWidget(LogosAPI* /*api*/) {
 
     // Qt's resource system is process-global: two modules that both
     // register /qml/Main.qml resolve to whichever registered first, so a
-    // second Antumbra module rendered the first one's UI over its own
+    // second module rendered the first one's UI over its own
     // data. The prefix is this module's name, which cannot collide.
     auto* view = new QQuickWidget();
     view->engine()->rootContext()->setContextProperty(
         QStringLiteral("bridge"), m_bridge);
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    // Without a focus policy the widget never takes keyboard focus inside
+    // Basecamp's dock: a click reaches the QML, but keys go to the host, so a
+    // text field cannot be typed into. Measured in Basecamp 0.3.0.
+    view->setFocusPolicy(Qt::StrongFocus);
     view->setSource(QUrl(QStringLiteral("qrc:/lez_program_registry/Main.qml")));
     return view;
 }

@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #include "registry_bridge.h"
 
+#include <QClipboard>
 #include <QCryptographicHash>
+#include <QGuiApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -12,13 +18,24 @@
 
 namespace {
 
-// No registry is compiled in: the testnet v0.3 deployment is pending funding,
-// and a built-in id from a superseded chain would derive addresses that hold
-// nothing, which reads as "not registered", a silent wrong answer. The panel
-// takes it from PROVENANCE_REGISTRY or from setRegistry(), and says so when
-// neither is set.
+// No registry is compiled in: the testnet v0.3 deployment has not happened
+// yet, and a built-in id from a superseded chain would derive addresses that
+// hold nothing, which reads as "not registered", a silent wrong answer. The
+// panel takes it from PROVENANCE_REGISTRY, then from its saved settings, and
+// says "not deployed yet" when neither is set.
 
 const char* kDefaultRpc = "https://testnet.lez.logos.co";
+
+// Basecamp passes --user-dir to its modules as LOGOS_USER_DIR. Settings live
+// under that directory's module_data, so a throwaway Basecamp instance never
+// reads or writes the default one's.
+QString settingsPath() {
+    const QByteArray user = qgetenv("LOGOS_USER_DIR");
+    const QString base = user.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        : QString::fromUtf8(user);
+    return QDir(base).filePath(QStringLiteral("module_data/lez_program_registry/settings.ini"));
+}
 
 QByteArray sha256(const QByteArray& in) {
     return QCryptographicHash::hash(in, QCryptographicHash::Sha256);
@@ -218,11 +235,18 @@ const char* stateWord(quint8 tag) {
 }  // namespace
 
 RegistryBridge::RegistryBridge(QObject* parent)
-    : QObject(parent), m_rpc(QString::fromLatin1(kDefaultRpc)) {
+    : QObject(parent), m_rpc(QString::fromLatin1(kDefaultRpc)), m_settingsFile(settingsPath()) {
+    // Environment first (a scripted run pins what it reads), then what the
+    // user saved, then the defaults.
+    QSettings saved(m_settingsFile, QSettings::IniFormat);
     const QByteArray envReg = qgetenv("PROVENANCE_REGISTRY");
-    if (!envReg.isEmpty()) m_registry = fromAccount(QString::fromLatin1(envReg));
+    const QString reg = envReg.isEmpty() ? saved.value(QStringLiteral("registry")).toString()
+                                         : QString::fromLatin1(envReg);
+    if (!reg.trimmed().isEmpty()) m_registry = fromAccount(reg);
     const QByteArray envRpc = qgetenv("LEZ_RPC");
-    if (!envRpc.isEmpty()) m_rpc = QString::fromLatin1(envRpc);
+    const QString rpc = envRpc.isEmpty() ? saved.value(QStringLiteral("rpc")).toString()
+                                         : QString::fromLatin1(envRpc);
+    if (!rpc.trimmed().isEmpty()) m_rpc = rpc.trimmed();
     // Qt's macOS system-proxy lookup builds a QRegularExpression, PCRE2 tries to
     // JIT-compile it, and pthread_jit_write_protect_np traps: Basecamp runs under
     // the hardened runtime without com.apple.security.cs.allow-jit, so the first
@@ -236,6 +260,36 @@ RegistryBridge::RegistryBridge(QObject* parent)
 
 QString RegistryBridge::registryId() const {
     return m_registry.isEmpty() ? QString() : base58(m_registry);
+}
+
+QString RegistryBridge::clipboardText() const {
+    const QClipboard* c = QGuiApplication::clipboard();
+    return c ? c->text().trimmed() : QString();
+}
+
+QString RegistryBridge::defaultEndpoint() const { return QString::fromLatin1(kDefaultRpc); }
+
+QStringList RegistryBridge::envOverrides() const {
+    QStringList out;
+    for (const char* e : {"LEZ_RPC", "PROVENANCE_REGISTRY"})
+        if (!qgetenv(e).isEmpty()) out << QString::fromLatin1(e);
+    return out;
+}
+
+bool RegistryBridge::saveSettings(const QString& rpc, const QString& registry) {
+    QByteArray id;
+    if (!registry.trimmed().isEmpty()) {
+        id = fromAccount(registry);
+        if (id.isEmpty()) return false;
+    }
+    m_registry = id;
+    m_rpc = rpc.trimmed().isEmpty() ? QString::fromLatin1(kDefaultRpc) : rpc.trimmed();
+    QDir().mkpath(QFileInfo(m_settingsFile).absolutePath());
+    QSettings saved(m_settingsFile, QSettings::IniFormat);
+    saved.setValue(QStringLiteral("rpc"), m_rpc);
+    saved.setValue(QStringLiteral("registry"), registryId());
+    saved.sync();
+    return true;
 }
 
 bool RegistryBridge::setRegistry(const QString& account) {
@@ -252,7 +306,8 @@ bool RegistryBridge::isProgramId(const QString& text) const {
 bool RegistryBridge::needRegistry() {
     if (!m_registry.isEmpty()) return true;
     emit failed(QStringLiteral(
-        "no registry set: set PROVENANCE_REGISTRY to the registry program account"));
+        "not deployed yet: no registry is set for %1. Once the v0.3 registry is deployed, "
+        "put its program account in Settings (or PROVENANCE_REGISTRY)").arg(m_rpc));
     return false;
 }
 

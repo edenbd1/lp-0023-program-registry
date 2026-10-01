@@ -95,3 +95,106 @@ jobs:
           LEZ_SRC: ${{ github.workspace }}/_external/lez
           REBUILD: "1"
         run: ./scripts/e2e-v03-local.sh
+
+  # The Basecamp module, built the way the catalog builds modules: mkLogosModule
+  # (app/flake.nix), `nix build .#lgx-portable`, on both platforms Basecamp
+  # 0.3.0 ships for. The builder's Qt is 6.9.2, the version Basecamp bundles,
+  # and a ceiling, since Qt refuses a plugin built against a newer minor. On
+  # macOS the packaged dylib is then unpacked and driven through every step
+  # Basecamp's loader takes for a `ui` module, against an official Qt 6.9.2.
+  module:
+    name: Basecamp module (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: module.json and src/metadata.json mirror metadata.json
+        run: cmp app/metadata.json app/module.json && cmp app/metadata.json app/src/metadata.json
+      - name: Build the portable package
+        run: nix build ./app#lgx-portable --accept-flake-config -L -o result
+      - name: Check the package
+        run: |
+          set -euo pipefail
+          cp result/*.lgx lez_program_registry.lgx
+          mkdir pkg && tar xzf lez_program_registry.lgx -C pkg
+          python3 - <<'PYCHECK'
+          import json, os
+          m = json.load(open("pkg/manifest.json"))
+          meta = json.load(open("app/metadata.json"))
+          variants = sorted(os.listdir("pkg/variants"))
+          print("name", m["name"], "version", m["version"], "type", m["type"], "variants", variants)
+          assert m["name"] == meta["name"] and m["version"] == meta["version"]
+          assert m["type"] == "ui", m["type"]
+          assert variants, "no variant"
+          for v in variants:
+              main = m["main"][v]
+              assert os.path.exists(f"pkg/variants/{v}/{main}"), main
+          PYCHECK
+      - name: Qt 6.9.2, the version Basecamp bundles
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/aqt
+          /tmp/aqt/bin/pip -q install aqtinstall
+          /tmp/aqt/bin/python -m aqt install-qt mac desktop 6.9.2 clang_64 -m qtremoteobjects \
+            --archives qtbase qtdeclarative qtshadertools --outputdir /tmp/Qt
+          test -d /tmp/Qt/6.9.2/macos/lib/QtQuickWidgets.framework
+          test -d /tmp/Qt/6.9.2/macos/lib/QtRemoteObjects.framework
+          # The plugin names libintl by @rpath; Basecamp bundles it, aqt's Qt does not.
+          nix build nixpkgs#gettext -o gettext
+      - name: Build the load harness
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          QT=/tmp/Qt/6.9.2/macos
+          # -include arm_acle.h: Qt 6.9.2's qyieldcpu.h calls __yield() without
+          # declaring it, which the runner's newer Xcode clang makes an error.
+          # It changes how the harness compiles, not the module under test.
+          clang++ -std=c++17 -Wall -Wextra -include arm_acle.h -F$QT/lib \
+            -I$QT/lib/QtCore.framework/Headers -I$QT/lib/QtGui.framework/Headers \
+            -I$QT/lib/QtWidgets.framework/Headers \
+            -framework QtWidgets -framework QtGui -framework QtCore \
+            -Wl,-rpath,$QT/lib app/tests/ui_plugin_load_test.cpp -o ui_plugin_load_test
+      - name: The packaged darwin-arm64 dylib loads the way Basecamp loads a ui plugin
+        if: runner.os == 'macOS'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_PLUGIN_PATH: /tmp/Qt/6.9.2/macos/plugins
+        run: |
+          set -euo pipefail
+          DYLD_FALLBACK_LIBRARY_PATH="$(readlink -f gettext)/lib" \
+            ./ui_plugin_load_test pkg/variants/darwin-arm64/lez_program_registry_plugin.dylib lez_program_registry_plugin 2>&1 | tee load.out
+          grep -q "assertions, all of them ran" load.out \
+            || { echo "the harness did not report a complete run"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lez_program_registry-${{ runner.os }}-${{ runner.arch }}
+          path: lez_program_registry.lgx
+
+  # One .lgx carrying both variants, as the catalog publishes it.
+  module-package:
+    name: Basecamp module, both platforms in one package
+    needs: module
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Merge macOS and Linux into one .lgx
+        run: |
+          set -euo pipefail
+          nix build github:logos-co/logos-package --accept-flake-config -o lgxtool
+          ./lgxtool/bin/lgx merge parts/*/lez_program_registry.lgx -o lez_program_registry.lgx -y
+          ./lgxtool/bin/lgx verify lez_program_registry.lgx
+          mkdir m && tar xzf lez_program_registry.lgx -C m && ls m/variants
+          test -d m/variants/linux-amd64 && test -d m/variants/darwin-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lez_program_registry-all-platforms
+          path: lez_program_registry.lgx

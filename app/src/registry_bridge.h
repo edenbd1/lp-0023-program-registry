@@ -20,6 +20,7 @@
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class RegistryBridge : public QObject {
     Q_OBJECT
@@ -56,6 +57,20 @@ public:
     Q_INVOKABLE void    setEndpoint(const QString& url);
     Q_INVOKABLE QString endpoint() const { return m_rpc; }
     Q_INVOKABLE QString registryId() const;
+    Q_INVOKABLE QString defaultEndpoint() const;
+    /// The clipboard's text, trimmed. Basecamp 0.3.0 does not route key events
+    /// to a legacy widget module, so a field is filled with a click on Paste.
+    Q_INVOKABLE QString clipboardText() const;
+
+    /// Set the sequencer and the registry and write both to the settings file
+    /// (LOGOS_USER_DIR/module_data/lez_program_registry/settings.ini). An empty
+    /// registry is allowed: it is the "not deployed yet" state. False if the
+    /// registry is not empty and not an account id; nothing is saved then.
+    Q_INVOKABLE bool saveSettings(const QString& rpc, const QString& registry);
+    Q_INVOKABLE QString settingsFile() const { return m_settingsFile; }
+    /// Which of LEZ_RPC / PROVENANCE_REGISTRY the environment set; they win
+    /// over a saved value.
+    Q_INVOKABLE QStringList envOverrides() const;
 
 signals:
     /// `verification` is one of unclaimed / claimed / verified / unreproducible.
@@ -88,5 +103,6 @@ private:
     QNetworkAccessManager m_net;
     QString m_rpc;
     QByteArray m_registry;
+    QString m_settingsFile;
     quint64 m_walkVerified = 0;
 };

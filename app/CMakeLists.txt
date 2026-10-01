@@ -6,10 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Two build paths:
 #
-# 1. Framework build — when $LOGOS_MODULE_BUILDER_ROOT is set (i.e.
-#    inside the logos-module-builder Nix dev shell), include
-#    LogosModule.cmake and let it wire up Qt + the SDK + LGX packaging.
-#    This is the production path that produces an installable .lgx.
+# 1. Framework build: when $LOGOS_MODULE_BUILDER_ROOT is set, which
+#    `nix build .#lgx-portable` (mkLogosModule, see flake.nix) does, include
+#    LogosModule.cmake and let it wire up Qt, the SDK and the .lgx packaging.
+#    This is the production path that produces the installable package.
 #
 # 2. Manual build — fallback for IDE workflows and the standalone
 #    preview app. Plain Qt6 CMake. Useful for QML iteration without
@@ -19,20 +19,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
     include($ENV{LOGOS_MODULE_BUILDER_ROOT}/cmake/LogosModule.cmake)
 
-    # QtConcurrent is deliberately absent: Basecamp 0.2.2 does not bundle it, so
-    # linking it makes the plugin unloadable. The bridge runs QProcess
-    # synchronously instead.
+    # The plugin is a legacy `type: ui` IComponent widget: the QML scene runs
+    # in a QQuickWidget inside Basecamp's own process, and the bridge talks to
+    # the sequencer through QtNetwork. QtConcurrent is deliberately absent, as
+    # Basecamp does not bundle it.
     find_package(Qt6 REQUIRED COMPONENTS
-        Widgets Quick QuickWidgets Qml Gui Network OpenGL)
-    find_package(nlohmann_json REQUIRED)
-    find_package(OpenSSL REQUIRED)
-    find_package(Boost CONFIG REQUIRED)
+        Widgets Quick QuickWidgets Qml Gui Network)
 
-    # Keep module.json in sync with metadata.json on every configure —
-    # the lambda-prize validation bot looks for the former, but the
-    # Basecamp package_manager reads the latter.
+    # Q_PLUGIN_METADATA(FILE "metadata.json") resolves next to src/plugin.h.
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/metadata.json
-                   ${CMAKE_CURRENT_BINARY_DIR}/module.json COPYONLY)
+                   ${CMAKE_CURRENT_SOURCE_DIR}/src/metadata.json COPYONLY)
 
     logos_module(
         NAME    lez_program_registry
@@ -41,15 +37,16 @@ if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
                 src/registry_bridge.h
                 src/registry_bridge.cpp
         LINK_TARGETS Qt6::Widgets Qt6::Quick Qt6::QuickWidgets
-                     Qt6::Qml Qt6::Gui Qt6::Network Qt6::OpenGL
-                     nlohmann_json::nlohmann_json
-                     OpenSSL::SSL Boost::system
+                     Qt6::Qml Qt6::Gui Qt6::Network
     )
 
+    # zlib, not zstd: a zstd-compressed resource needs a QtCore built with
+    # zstd (the symbol qt_resourceFeatureZstd), and not every Qt 6.9.2 is.
     qt_add_resources(lez_program_registry_module_plugin "qml"
         PREFIX "/lez_program_registry"
         BASE "qml"
         FILES qml/Main.qml qml/qmldir
+        OPTIONS --no-zstd
     )
 
 else()
@@ -88,7 +85,7 @@ else()
     # Basecamp's plugin discovery expects <plugin>/<plugin>.<ext>,
     # not the default lib-prefixed name.
     set_target_properties(lez_program_registry_plugin PROPERTIES
-        OUTPUT_NAME "lez_program_registry"
+        OUTPUT_NAME "lez_program_registry_plugin"
         PREFIX ""
     )
 
