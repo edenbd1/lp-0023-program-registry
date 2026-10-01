@@ -1,7 +1,7 @@
 {
   "name": "lez_program_registry",
-  "version": "0.1.0",
-  "description": "LEZ program registry — look up a program's provenance by deriving its entry address locally and reading it from a sequencer, with no index in the path",
+  "version": "0.3.0",
+  "description": "Provenance, the LEZ program registry (v0.3): look up a program's provenance by deriving its entry address locally and reading it from a sequencer, with no index in the path",
   "author": "edenbd1",
   "type": "ui",
   "main": "lez_program_registry",
