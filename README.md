@@ -227,8 +227,9 @@ More in [`docs/design-positions.md`](docs/design-positions.md).
 ## Cost
 
 Every instruction is about 1% of the 10M execution-gas ceiling or less:
-`register` 105,403 cycles, `update` 55,611. Measured per plan and apply call in
-[`CYCLES.md`](CYCLES.md) with `tools/cycles-v03`.
+`register` 106,297 cycles, `update` 56,326, on the sealed guest `dd12f4a8`.
+Measured per plan and apply call by the method of LEZ v0.3.0's
+`tools/cycle_bench`, in [`CYCLES.md`](CYCLES.md) with `tools/cycles-v03`.
 
 ## Layout
 

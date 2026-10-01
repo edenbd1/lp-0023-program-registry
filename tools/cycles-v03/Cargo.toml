@@ -1,7 +1,10 @@
 # Measures what each registry instruction costs on LEZ v0.3: the RISC0 cycles
 # of its plan call plus every apply call, which is exactly what a public
 # transaction is charged as execution gas. Runs the real guest binary under the
-# same executor the sequencer uses (no proving), with inputs built by the SDK.
+# same executor the sequencer uses (no proving), with inputs built by the SDK,
+# by the method of LEZ v0.3.0's tools/cycle_bench: its guest input writers,
+# one row per plan and per apply, best and mean executor time over five runs
+# after a warmup.
 [workspace]
 
 [package]
@@ -12,6 +15,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
+lee               = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", rev = "db66590ab821a4e142c211017a3866d007f6fa77" }
 lee_core          = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", rev = "db66590ab821a4e142c211017a3866d007f6fa77", features = ["host"] }
 risc0-zkvm        = { version = "=3.0.5" }
 lez-registry-core = { path = "../.." }

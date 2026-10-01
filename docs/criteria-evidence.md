@@ -37,7 +37,7 @@ testnet v0.3 deployment is **pending funding** ([deploy-v03.md](deploy-v03.md)).
 
 | criterion | status | evidence |
 |---|---|---|
-| Cycle counts for register and update | **met** | [CYCLES.md](../CYCLES.md): register 105,403, update 55,611 cycles (plan plus applies), `tools/cycles-v03` |
+| Cycle counts for register and update | **met** | [CYCLES.md](../CYCLES.md): register 106,297, update 56,326 cycles (plan plus applies) on the sealed guest `dd12f4a8`, measured by the method of LEZ v0.3.0 `tools/cycle_bench` in `tools/cycles-v03`; output in `evidence/cycles-v03.txt` |
 
 ## Supportability
 

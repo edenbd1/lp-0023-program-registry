@@ -6,32 +6,43 @@ of those RISC0 cycles as execution gas (`fee_actual_base`,
 `lez/programs/fee/core/src/assess.rs`). The per-transaction ceiling is
 `max_gas_exec` = **10,000,000** (`getFeeState` on a v0.3.0 sequencer).
 
-The figures below are those sums, measured by running the real guest binary
-through exactly that plan-then-apply sequence under the RISC0 3.0.5 executor
-(the one the sequencer uses when it does not prove), with instructions and
-shard selectors built by the SDK and shard contents carried from one
-instruction to the next:
+The figures below are those sums, measured the way LEZ v0.3.0's own
+[`tools/cycle_bench`](https://github.com/logos-blockchain/logos-execution-zone/tree/v0.3.0/tools/cycle_bench)
+measures the built-in programs (tag `v0.3.0`, commit `db66590ab`): guest inputs
+written by `lee::program::Program::write_plan_inputs` and `write_apply_inputs`
+(the writers the sequencer uses), `default_executor().execute` under RISC0 3.0.5
+with no proving, one row per plan call and per apply call, user cycles from the
+executor, wall time as best and mean of five runs after a discarded warmup.
+`cycle_bench`'s fixtures are the built-in programs only, so the registry's
+cases live in `tools/cycles-v03`: instructions and shard selectors built by the
+SDK, shard contents carried from one instruction to the next.
 
 ```bash
-cd tools/cycles-v03 && cargo run --release -- <lez_registry.bin>
+cd tools/cycles-v03 && cargo run --release -- ../../artifacts/programs/lez_registry.bin
 ```
 
-Guest: ImageID `0e3fe974e184e40062811f28c4d8c17df208bf80ee0ce7ee09148aa0f8dfa53d`
-(the build the local end-to-end run deployed, `evidence/e2e-v03-local.txt`).
+Guest: the committed sealed build `artifacts/programs/lez_registry.bin`, ImageID
+`dd12f4a8e3c7218d85cdf6c0625014b352e65be3ff447b911766476671cd6266`
+([deploy-v03.md](docs/deploy-v03.md)). Full output, with per-call segments and
+executor times: [`evidence/cycles-v03.txt`](evidence/cycles-v03.txt).
 
 | instruction | plan | applies | total cycles (execution gas) | share of the 10M ceiling |
 |---|---:|---|---:|---:|
-| `initialize` | 10,164 | 6,897 | 17,061 | 0.17% |
-| `register` (deployer, with source claim) | 63,014 | 8,833 + 7,078 + 7,811 + 18,667 | **105,403** | 1.05% |
-| `update` (version, description, IDL) | 33,806 | 21,805 | **55,611** | 0.56% |
-| `claim_source` | 21,802 | 22,939 | 44,741 | 0.45% |
-| `record_rebuild` (match, offline: Verified) | 22,889 | 8,833 + 21,425 | 53,147 | 0.53% |
-| `sync_header` (unchanged) | 20,469 | 8,833 + 20,703 | 50,005 | 0.50% |
-| `freeze` | 17,760 | 20,836 | 38,596 | 0.39% |
+| `initialize` | 10,374 | 7,068 | 17,442 | 0.17% |
+| `register` (deployer, with source claim) | 63,401 | 8,973 + 7,220 + 7,983 + 18,720 | **106,297** | 1.06% |
+| `update` (version, description, IDL) | 34,442 | 21,884 | **56,326** | 0.56% |
+| `claim_source` | 21,982 | 23,006 | 44,988 | 0.45% |
+| `record_rebuild` (match, offline: Verified) | 23,106 | 8,973 + 21,453 | 53,532 | 0.54% |
+| `sync_header` (unchanged) | 20,691 | 8,973 + 20,772 | 50,436 | 0.50% |
+| `freeze` | 17,979 | 20,901 | 38,880 | 0.39% |
+
+Every call is one segment, and each takes about 30 ms in the executor on an
+Apple M-series laptop, most of it the fixed per-call cost of loading the ELF
+that `cycle_bench`'s calibration reports as its intercept.
 
 The `register` applies are, in order: the read-only check of the program's
-header in the loader shard (8,833), the global counter (7,078), the directory
-slot (7,811), and the entry itself (18,667). The same 8,833-cycle header check
+header in the loader shard (8,973), the global counter (7,220), the directory
+slot (7,983), and the entry itself (18,720). The same 8,973-cycle header check
 is what `record_rebuild` and `sync_header` pay to compare against the chain.
 
 The entry this sequence ends with is 500 bytes in the registry's shard.

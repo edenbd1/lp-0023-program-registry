@@ -8,38 +8,77 @@
 //! instructions and shard selectors built by the SDK and shard contents carried
 //! from one instruction to the next, and prints the per-call and total cycles.
 //!
+//! The method is LEZ v0.3.0's `tools/cycle_bench` (same input writers, same
+//! executor, one row per plan and per apply, warmup then timed runs); its
+//! fixtures are built-in programs, so the registry's cases live here.
+//!
 //!   cargo run --release -- <lez_registry.bin>
 
+use lee::program::Program;
 use lee_core::{
     account::{AccountId, ProgramShardSelector},
+    from_frame,
     program::{
-        AccountMeta, ApplyInput, CallKind, GuestOutput, PlanInput, ProgramHeader,
-        PROGRAM_LOADER_ACCOUNT_ID,
+        AccountMeta, ApplyInput, GuestOutput, PlanInput, ProgramHeader, PROGRAM_LOADER_ACCOUNT_ID,
     },
-    to_borsh_frame, to_frame,
 };
 use lez_registry_core::{self as core_, instruction::EntryKey};
 use lez_registry_sdk::{self as sdk, BuiltTransaction, HeaderView};
-use risc0_zkvm::{default_executor, ExecutorEnv};
-use std::collections::HashMap;
+use risc0_zkvm::{default_executor, ExecutorEnv, ExecutorEnvBuilder};
+use std::{collections::HashMap, time::Instant};
 
 type Shards = HashMap<([u8; 32], [u8; 32]), Vec<u8>>;
 
-fn run(elf: &[u8], kind: CallKind, payload: &[u8]) -> (GuestOutput, u64) {
-    let mut b = ExecutorEnv::builder();
-    b.write_slice(&to_borsh_frame(&kind));
-    b.write_slice(&to_frame(payload));
-    let env = b.build().expect("env builds");
-    let info = default_executor().execute(env, elf).expect("the guest runs");
-    let cycles = info.cycles();
-    let journal = info.journal.bytes;
-    let len = u32::from_le_bytes(journal[..4].try_into().unwrap()) as usize;
-    let out: GuestOutput = borsh::from_slice(&journal[4..4 + len]).expect("a guest output");
-    (out, cycles)
+/// Executor runs per call after one warmup run, as cycle_bench's default
+/// `--exec-iters 5`.
+const EXEC_ITERS: usize = 5;
+
+/// One guest call: cycles, segments, best and mean executor wall time.
+struct Row {
+    cycles: u64,
+    segments: usize,
+    best_ms: f64,
+    mean_ms: f64,
 }
 
-/// Run one transaction: plan, then every apply. Returns (plan, applies, total).
-fn execute(elf: &[u8], registry: &[u8; 32], tx: &BuiltTransaction, shards: &mut Shards) -> (u64, Vec<u64>, u64) {
+/// One guest call measured as LEZ v0.3.0's `tools/cycle_bench` measures it:
+/// inputs written by `lee::program::Program::write_{plan,apply}_inputs` (the
+/// writers the sequencer itself uses), `default_executor().execute` with no
+/// proving, one warmup run discarded and `EXEC_ITERS` timed runs kept. The cycle
+/// count is the executor's user cycles, identical on every run.
+fn run(elf: &[u8], write: impl Fn(&mut ExecutorEnvBuilder)) -> (GuestOutput, Row) {
+    let mut samples = Vec::with_capacity(EXEC_ITERS);
+    let mut last = None;
+    for iter in 0..=EXEC_ITERS {
+        let mut b = ExecutorEnv::builder();
+        write(&mut b);
+        let env = b.build().expect("env builds");
+        let started = Instant::now();
+        let info = default_executor().execute(env, elf).expect("the guest runs");
+        let ms = started.elapsed().as_secs_f64() * 1_000.0;
+        if iter > 0 {
+            samples.push(ms);
+        }
+        last = Some(info);
+    }
+    let info = last.expect("at least one run");
+    let payload = from_frame(&info.journal.bytes).expect("a framed journal");
+    let out: GuestOutput = borsh::from_slice(payload).expect("a guest output");
+    let best_ms = samples.iter().copied().fold(f64::INFINITY, f64::min);
+    let mean_ms = samples.iter().sum::<f64>() / samples.len() as f64;
+    (out, Row { cycles: info.cycles(), segments: info.segments.len(), best_ms, mean_ms })
+}
+
+fn plan(elf: &[u8], input: &PlanInput) -> (GuestOutput, Row) {
+    run(elf, |b| Program::write_plan_inputs(input, b).expect("plan input"))
+}
+
+fn apply(elf: &[u8], input: &ApplyInput) -> (GuestOutput, Row) {
+    run(elf, |b| Program::write_apply_inputs(input, b).expect("apply input"))
+}
+
+/// Run one transaction: plan, then every apply, carrying shard contents.
+fn execute(elf: &[u8], registry: &[u8; 32], tx: &BuiltTransaction, shards: &mut Shards) -> (Row, Vec<Row>) {
     let signers = tx.signer_ids();
     let input = PlanInput {
         self_account_id: AccountId::new(*registry),
@@ -57,10 +96,10 @@ fn execute(elf: &[u8], registry: &[u8; 32], tx: &BuiltTransaction, shards: &mut 
             .collect(),
         instruction_data: tx.instruction_data.clone(),
     };
-    let (out, plan_cycles) = run(elf, CallKind::Plan, &borsh::to_vec(&input).unwrap());
-    let GuestOutput::Plan(plan) = out else { panic!("plan returned an apply") };
+    let (out, plan_row) = plan(elf, &input);
+    let GuestOutput::Plan(planned) = out else { panic!("plan returned an apply") };
     let mut applies = Vec::new();
-    for effect in plan.effects {
+    for effect in planned.effects {
         let key = (*effect.selector.account_id.value(), *effect.selector.program_account_id.value());
         let pre = shards.get(&key).cloned().unwrap_or_default();
         let ai = ApplyInput {
@@ -69,20 +108,21 @@ fn execute(elf: &[u8], registry: &[u8; 32], tx: &BuiltTransaction, shards: &mut 
             pre_data: pre.try_into().expect("fits"),
             effect_data: effect.data,
         };
-        let (out, c) = run(elf, CallKind::Apply, &borsh::to_vec(&ai).unwrap());
+        let (out, row) = apply(elf, &ai);
         let GuestOutput::Apply(a) = out else { panic!("apply returned a plan") };
         if let Some(post) = a.post_data {
             shards.insert(key, post.into_inner());
         }
-        applies.push(c);
+        applies.push(row);
     }
-    let total = plan_cycles + applies.iter().sum::<u64>();
-    (plan_cycles, applies, total)
+    (plan_row, applies)
 }
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "../../artifacts/programs/lez_registry.bin".into());
     let elf = std::fs::read(&path).expect("read the guest binary");
+    let image_id = Program::new(elf.clone().into()).expect("a RISC0 program binary").id();
+    let image_hex: String = image_id.iter().flat_map(|w| w.to_le_bytes()).map(|b| format!("{b:02x}")).collect();
     let registry = [0x42u8; 32];
     let program = [0x11u8; 32];
     let attester = [0x33u8; 32];
@@ -147,13 +187,25 @@ fn main() {
         ("freeze", sdk::build_freeze(&registry, &key, &program)),
     ];
 
-    println!("guest  {path}");
-    println!("| instruction | plan | applies | total cycles (execution gas) |");
-    println!("|---|---:|---|---:|");
+    println!("guest    {path}");
+    println!("ImageID  {image_hex}");
+    println!("method   LEZ v0.3.0 tools/cycle_bench (executor, no proving; best / mean of {EXEC_ITERS} runs after a warmup)\n");
+    println!("| instruction | phase | user cycles | segments | exec ms (best / mean) |");
+    println!("|---|---|---:|---:|---:|");
+    let mut totals = Vec::new();
     for (name, tx) in &txs {
-        let (p, a, t) = execute(&elf, &registry, tx, &mut shards);
-        let a: Vec<String> = a.iter().map(u64::to_string).collect();
-        println!("| `{name}` | {p} | {} | {t} |", a.join(" + "));
+        let (p, a) = execute(&elf, &registry, tx, &mut shards);
+        for (phase, r) in std::iter::once(("plan", &p)).chain(a.iter().map(|r| ("apply", r))) {
+            println!("| `{name}` | {phase} | {} | {} | {:.2} / {:.2} |", r.cycles, r.segments, r.best_ms, r.mean_ms);
+        }
+        let applies: Vec<String> = a.iter().map(|r| r.cycles.to_string()).collect();
+        let total = p.cycles + a.iter().map(|r| r.cycles).sum::<u64>();
+        totals.push(format!("| `{name}` | {} | {} | {total} |", p.cycles, applies.join(" + ")));
+    }
+    println!("\n| instruction | plan | applies | total cycles (execution gas) |");
+    println!("|---|---:|---|---:|");
+    for t in &totals {
+        println!("{t}");
     }
     // What a refused call costs: an update signed by someone who is not the
     // author. The apply panics; the executor reports the cycles it ran.
@@ -170,9 +222,10 @@ fn main() {
             .collect(),
         instruction_data: refused.instruction_data.clone(),
     };
-    let (out, plan_c) = run(&elf, CallKind::Plan, &borsh::to_vec(&input).unwrap());
-    let GuestOutput::Plan(plan) = out else { panic!() };
-    let effect = plan.effects.into_iter().next().unwrap();
+    let (out, plan_row) = plan(&elf, &input);
+    let plan_c = plan_row.cycles;
+    let GuestOutput::Plan(planned) = out else { panic!() };
+    let effect = planned.effects.into_iter().next().unwrap();
     let pre = shards.get(&(sdk::entry_address(&registry, &program), registry)).cloned().unwrap();
     let ai = ApplyInput {
         self_account_id: AccountId::new(registry),
@@ -181,8 +234,7 @@ fn main() {
         effect_data: effect.data,
     };
     let mut b = ExecutorEnv::builder();
-    b.write_slice(&to_borsh_frame(&CallKind::Apply));
-    b.write_slice(&to_frame(&borsh::to_vec(&ai).unwrap()));
+    Program::write_apply_inputs(&ai, &mut b).expect("apply input");
     b.session_limit(Some(10_000_000));
     match default_executor().execute(b.build().unwrap(), &elf) {
         Ok(info) => println!("\nrefused update: plan {plan_c}, apply exited {:?} after {} cycles", info.exit_code, info.cycles()),
